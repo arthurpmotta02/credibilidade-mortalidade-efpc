@@ -1099,25 +1099,19 @@ rate_summary <- tibble(
 rate_summary <- rate_summary |>
   mutate(faixa = factor(faixa, levels = labels_fx))
 
-# Reorganizar em formato long para facilitar o plot com jitter
-rate_long <- rate_summary |>
-  mutate(faixa_num = as.numeric(faixa)) |>
-  select(faixa, faixa_num, mediana, lo95, hi95, lam_BS)
-
-ggplot(rate_long) +
-  # IC 95% bayesiano como barras de erro com caps
-  geom_errorbar(aes(x = faixa_num - 0.12, ymin = lo95, ymax = hi95),
-                width = 0.15, linewidth = 0.9, alpha = 0.6, colour = "steelblue") +
-  # Ponto bayesiano (mediana)
-  geom_point(aes(x = faixa_num - 0.12, y = mediana, colour = "Bayesiano"),
-             size = 3.5, shape = 16) +
-  # Ponto B-S (ligeiramente à direita)
-  geom_point(aes(x = faixa_num + 0.12, y = lam_BS, colour = "Bühlmann-Straub"),
+ggplot(rate_summary, aes(x = faixa)) +
+  # IC 95% bayesiano (barra com caps, atrás dos pontos)
+  geom_errorbar(aes(ymin = lo95, ymax = hi95),
+                width = 0.25, linewidth = 0.8,
+                alpha = 0.5, colour = "steelblue") +
+  # Ponto B-S (triângulo, ligeiramente menor para não cobrir o círculo)
+  geom_point(aes(y = lam_BS, colour = "Bühlmann-Straub"),
              size = 3.5, shape = 17) +
+  # Ponto bayesiano (círculo, por cima)
+  geom_point(aes(y = mediana, colour = "Bayesiano"),
+             size = 3.0, shape = 16) +
   scale_colour_manual(name = NULL,
     values = c("Bayesiano" = "steelblue", "Bühlmann-Straub" = "#E74C3C")) +
-  scale_x_continuous(breaks = seq_along(levels(rate_long$faixa)),
-                     labels = levels(rate_long$faixa)) +
   scale_y_log10(
     breaks = 10^(-5:-1),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
