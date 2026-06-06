@@ -29,7 +29,7 @@ execute:
 
 ```{r setup}
 #| label: setup
-#| include: true
+#| include: false
 
 library(tidyverse)
 library(scales)
@@ -410,7 +410,10 @@ ggplot(sum_d2_tx, aes(x = Idade, y = tx_tot, colour = faixa)) +
   geom_vline(xintercept = c(18, 40, 60, 80),
              linetype = "dotted", colour = "grey40", linewidth = 0.7) +
   scale_colour_viridis_d(name = "Faixa", option = "D", end = 0.9) +
-  scale_y_log10(labels = label_scientific()) +
+  scale_y_log10(
+    breaks = 10^(-5:-1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
   scale_x_continuous(breaks = seq(0, 110, by = 10)) +
   labs(x = "Idade", y = expression(hat(q)[x]~"(escala log)")) +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
@@ -475,7 +478,10 @@ ggplot(frame_comp |> filter(!is.na(tx_obs), tx_obs > 0), aes(x = Idade)) +
   geom_line(aes(y = at2000_m, colour = "AT-2000-m"), linewidth = 0.95) +
   geom_line(aes(y = brems_m,  colour = "BR-EMSsb-m v.2021"), linewidth = 0.95) +
 
-  scale_y_log10(labels = label_scientific()) +
+  scale_y_log10(
+    breaks = 10^(-5:-1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
   scale_x_continuous(breaks = seq(0, 110, by = 10)) +
   labs(x = "Idade", y = expression(q[x]~"(escala log)")) +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
@@ -1093,41 +1099,64 @@ rate_summary <- tibble(
 rate_summary <- rate_summary |>
   mutate(faixa = factor(faixa, levels = labels_fx))
 
-ggplot(rate_summary, aes(x = faixa)) +
-  geom_linerange(aes(ymin = lo95, ymax = hi95), linewidth = 1.5,
-                 alpha = 0.4, colour = "steelblue") +
-  geom_point(aes(y = mediana, colour = "Bayesiano"), size = 3.5, shape = 16) +
-  geom_point(aes(y = lam_BS,  colour = "Bühlmann-Straub"), size = 3.5, shape = 17) +
+# Reorganizar em formato long para facilitar o plot com jitter
+rate_long <- rate_summary |>
+  mutate(faixa_num = as.numeric(faixa)) |>
+  select(faixa, faixa_num, mediana, lo95, hi95, lam_BS)
+
+ggplot(rate_long) +
+  # IC 95% bayesiano como barras de erro com caps
+  geom_errorbar(aes(x = faixa_num - 0.12, ymin = lo95, ymax = hi95),
+                width = 0.15, linewidth = 0.9, alpha = 0.6, colour = "steelblue") +
+  # Ponto bayesiano (mediana)
+  geom_point(aes(x = faixa_num - 0.12, y = mediana, colour = "Bayesiano"),
+             size = 3.5, shape = 16) +
+  # Ponto B-S (ligeiramente à direita)
+  geom_point(aes(x = faixa_num + 0.12, y = lam_BS, colour = "Bühlmann-Straub"),
+             size = 3.5, shape = 17) +
   scale_colour_manual(name = NULL,
     values = c("Bayesiano" = "steelblue", "Bühlmann-Straub" = "#E74C3C")) +
-  scale_y_log10(labels = label_scientific()) +
+  scale_x_continuous(breaks = seq_along(levels(rate_long$faixa)),
+                     labels = levels(rate_long$faixa)) +
+  scale_y_log10(
+    breaks = 10^(-5:-1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
   labs(x = "Grupo", y = "Taxa estimada (escala log)") +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom")
 ```
 
-O gráfico sobrepõe as taxas de Bühlmann-Straub (triângulos vermelhos) e as medianas
-posteriores do modelo bayesiano (círculos azuis) com intervalos credíveis de 95%
-(barras verticais). A sobreposição quase perfeita dos dois conjuntos de pontos em
-todas as faixas confirma empiricamente a equivalência teórica entre os dois
-estimadores para este conjunto de dados: as diferenças são inferiores a 0,4
-sinistros por grupo.
+O gráfico sobrepõe as taxas de Bühlmann-Straub (triângulos vermelhos, ligeiramente
+à direita) e as medianas posteriores do modelo bayesiano (círculos azuis, ligeiramente
+à esquerda) com barras de erro mostrando o intervalo credível de 95% para cada grupo.
+O deslocamento horizontal de $\pm 0{,}12$ evita sobreposição dos pontos e permite
+comparar visualmente os dois métodos em cada faixa.
 
-O diferencial do modelo bayesiano não está nos valores pontuais, mas na quantificação
-da incerteza. Para $80+$, que sozinha responde por $\approx 626$ dos 1.267 sinistros
-previstos, o IC 95% é $[598;\; 656]$ --- amplitude de 58 sinistros que representa
-a incerteza atuarial sobre a faixa de maior impacto financeiro. Para $[60,80)$, o
-IC 95% é $[487;\; 539]$, com amplitude de 52 sinistros. As faixas jovens têm
-intervalos proporcionalmente mais largos em relação à mediana: $[18,40)$ com IC
-$[24;\; 36]$ ao redor da mediana 30 tem amplitude relativa de $\approx 40\%$, muito
-maior que os $\approx 10\%$ de $80+$. Isso reflete que a incerteza sobre a taxa
-de mortalidade jovem é proporcionalmente maior, dada a escassez de óbitos nessa faixa.
+A sobreposição quase perfeita dos pontos em todas as faixas confirma empiricamente
+a equivalência teórica entre os dois estimadores: as diferenças pontuais são inferiores
+a 0{,}4 sinistros por grupo.
 
-O gráfico também evidencia uma propriedade estrutural: o modelo bayesiano hierárquico
-estima $\sigma_u$ integrando sobre sua incerteza posterior, e essa incerteza se
-propaga para os ICs dos grupos. Bühlmann-Straub, por outro lado, substitui $\hat{\tau}^2$
-por seu estimador de momentos sem propagar a incerteza de estimação --- o que subestima
-sistematicamente a incerteza total das previsões, em especial quando $m$ é pequeno.
+O diferencial do modelo bayesiano está nas barras de erro, que o Bühlmann-Straub
+não produz. Duas propriedades se destacam no gráfico. Primeiro, os ICs são
+proporcionalmente mais largos nas faixas com menos óbitos: $[0,18)$ tem barra
+longa e $80+$ tem barra curta, refletindo que a incerteza sobre a taxa de
+mortalidade cresce conforme diminui o número de eventos observados. Segundo, em
+escala log os ICs parecem simétricos visualmente, mas na escala original são
+assimétricos para cima — propriedade natural da distribuição log-normal do efeito
+aleatório $u_i$.
+
+Para $80+$, que responde por $\approx 626$ dos 1.267 sinistros previstos, o IC 95%
+é $[598;\; 656]$ — amplitude de 58 sinistros. Para $[60,80)$ o IC 95% é
+$[487;\; 539]$, amplitude de 52 sinistros. Para $[18,40)$, com apenas 89 óbitos no
+triênio, a amplitude relativa do IC chega a $\approx 40\%$ da mediana, muito maior
+que os $\approx 10\%$ de $80+$.
+
+O modelo bayesiano hierárquico estima $\sigma_u$ integrando sobre sua incerteza
+posterior, propagando-a para os ICs dos grupos. Bühlmann-Straub, por outro lado,
+substitui $\hat{\tau}^2$ pelo seu estimador de momentos sem propagar a incerteza de
+estimação, subestimando sistematicamente a incerteza total das previsões quando $m$
+é pequeno [@lord2008; @park2010].
 
 ## Verificação preditiva posterior
 
@@ -1147,25 +1176,23 @@ de ajuste mais importante de um modelo bayesiano: testa se o modelo, depois de a
 consegue gerar dados parecidos com os que foram observados. Cada linha cinza representa
 uma réplica $\tilde{N}_{it}$ amostrada da distribuição preditiva posterior
 $p(\tilde{N} \mid \mathbf{N}_{\text{obs}})$; a linha escura são os 15 valores observados
-$(N_{it}$ para os 5 grupos $\times$ 3 anos). Uma boa sobreposição indica que o modelo
+($N_{it}$ para os 5 grupos $\times$ 3 anos). Uma boa sobreposição indica que o modelo
 é compatível com a estrutura dos dados.
 
 O gráfico esperado para este modelo exibirá linhas cinzas que envolvem a linha escura,
 com a moda e a cauda razoavelmente reproduzidas. A bimodalidade esperada nos dados
---- contagens baixas para $[0,18)$ e $[18,40)$, altas para $[60,80)$ e $80+$ ---
+— contagens baixas para $[0,18)$ e $[18,40)$, altas para $[60,80)$ e $80+$ —
 deve aparecer também nas réplicas. Desvio sistemático como cauda pesada nas réplicas
-que não apareça nos dados reais sinalizaria má especificação distribucional (por
-exemplo, superdispersão não modelada). No caso deste fundo de pensão, a hipótese
-Poisson condicional é razoável porque a heterogeneidade entre grupos é capturada pelo
-efeito aleatório $u_i$. O que resta dentro de cada grupo é ruído Poisson:
-o CV observado dos óbitos anuais por faixa varia de $3{,}8\%$ (em $[40,60)$,
-a faixa mais estável) a $22{,}4\%$ (em $[18,40)$, a mais escassa), valores
-calculados na seção~(ii) a partir dos dados brutos. A previsão teórica Poisson
-para o CV de $N_{it}$ é $1/\sqrt{E[N_{it}]}$: para $[40,60)$ com $E[N] \approx 96$,
-isso dá $1/\sqrt{96} \approx 10{,}2\%$, e o CV observado de $3{,}8\%$ é ainda
-menor, indicando que a hipótese Poisson é conservadora e adequada para este grupo.
-Para $[18,40)$ com $E[N] \approx 30$ a previsão teórica é $18{,}3\%$ e o CV
-observado de $22{,}4\%$ é ligeiramente acima, mas dentro da margem esperada.
+que não apareça nos dados reais sinalizaria má especificação distribucional. No caso
+deste fundo de pensão, a hipótese Poisson condicional é razoável porque a heterogeneidade
+entre grupos é capturada pelo efeito aleatório $u_i$. O CV observado dos óbitos anuais
+por faixa varia de $3{,}8\%$ (em $[40,60)$, a faixa mais estável) a $22{,}4\%$ (em
+$[18,40)$, a mais escassa), valores calculados na seção~(ii) a partir dos dados brutos.
+A previsão teórica Poisson para o CV de $N_{it}$ é $1/\sqrt{E[N_{it}]}$: para $[40,60)$
+com $E[N] \approx 96$, isso dá $1/\sqrt{96} \approx 10{,}2\%$, e o CV observado de
+$3{,}8\%$ é ainda menor, indicando que a hipótese Poisson é conservadora e adequada.
+Para $[18,40)$ com $E[N] \approx 30$ a previsão teórica é $18{,}3\%$ e o CV observado
+de $22{,}4\%$ é ligeiramente acima, mas dentro da margem esperada.
 
 ## Priori vs. posteriori de $\sigma_u$
 
@@ -1174,15 +1201,11 @@ observado de $22{,}4\%$ é ligeiramente acima, mas dentro da margem esperada.
 #| fig-cap: "Priori Exp(1) e distribuição posterior de $\\sigma_u$ (desvio padrão dos efeitos aleatórios)"
 #| fig-height: 3.5
 
-# Amostras posteriori de sigma_u
 sigma_draws <- as_draws_df(fit_bayes)$`sd_faixa__Intercept`
 
-# Limites dinâmicos para evitar "rows removed" na density
-x_max <- max(quantile(sigma_draws, 0.999), 6)
+x_max      <- max(quantile(sigma_draws, 0.999), 6)
 sigma_grid <- seq(0, x_max, length.out = 600)
-
-sigma_med <- median(sigma_draws)
-dens_peak <- dexp(0.001, rate = 1)  # pico da Exp(1) ≈ 1, em x→0
+sigma_med  <- median(sigma_draws)
 
 ggplot() +
   geom_area(
@@ -1191,27 +1214,19 @@ ggplot() +
     fill = "grey80", alpha = 0.6, colour = "grey60", linewidth = 0.5
   ) +
   geom_density(
-    data    = tibble(sigma = sigma_draws),
+    data = tibble(sigma = sigma_draws),
     aes(x = sigma),
-    fill    = "steelblue", alpha = 0.45, colour = "steelblue4",
-    linewidth = 0.9
+    fill = "steelblue", alpha = 0.45, colour = "steelblue4", linewidth = 0.9
   ) +
-  geom_vline(
-    xintercept = sigma_med, colour = "steelblue4",
-    linetype = "dashed", linewidth = 0.8
-  ) +
-  annotate("text",
-           x = sigma_med + 0.12, y = 0.52,
+  geom_vline(xintercept = sigma_med, colour = "steelblue4",
+             linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = sigma_med + 0.12, y = 0.52,
            label = sprintf("Mediana = %.2f", sigma_med),
            hjust = 0, size = 3.3, colour = "steelblue4") +
-  annotate("text",
-           x = 0.25, y = 0.72,
-           label = "Priori Exp(1)",
-           hjust = 0, size = 3.3, colour = "grey40") +
-  annotate("text",
-           x = sigma_med - 0.1, y = 0.3,
-           label = "Posteriori",
-           hjust = 1, size = 3.3, colour = "steelblue4") +
+  annotate("text", x = 0.25, y = 0.72,
+           label = "Priori Exp(1)", hjust = 0, size = 3.3, colour = "grey40") +
+  annotate("text", x = sigma_med - 0.1, y = 0.3,
+           label = "Posteriori", hjust = 1, size = 3.3, colour = "steelblue4") +
   coord_cartesian(xlim = c(0, x_max)) +
   labs(x = expression(sigma[u]), y = "Densidade") +
   theme_bw(base_size = 12)
@@ -1228,13 +1243,12 @@ de $(1{,}21;\; 4{,}10)$ conforme o `summary()`.
 A mediana de $\sigma_u$ na escala log tem interpretação direta: a taxa
 esperada de dois grupos pode diferir por um fator de $e^{2\,\sigma_u}$.
 Com a mediana reportada pelo modelo ($\approx 2{,}2$), esse fator é
-$e^{4{,}4} \approx 80$ vezes --- coerente com a razão observada entre os
+$e^{4{,}4} \approx 80$ vezes — coerente com a razão observada entre os
 extremos da carteira: $\bar{F}_{80+}/\bar{F}_{[18,40)} = 0{,}0684/0{,}0005
 \approx 139$, que na escala de desvio padrão equivale a $\log(139)/2 \approx
-2{,}49$. A posteriori de $\sigma_u$ captura essa magnitude de heterogeneidade
-sem que nenhuma hipótese paramétrica sobre a forma de distribuição de $\theta_i$
-tenha sido necessária --- em contraste com o modelo Poisson-Gama da seção
-anterior, que a impõe explicitamente.
+2{,}49$. A posteriori captura essa magnitude de heterogeneidade sem que nenhuma
+hipótese paramétrica sobre a forma de distribuição de $\theta_i$ tenha sido
+necessária.
 
 A amplitude do IC 95% de $\sigma_u$ (de 1,21 a 4,10) reflete que, com apenas
 $m = 5$ grupos, a estimação de $\sigma_u$ é inerentemente incerta mesmo com
@@ -1249,15 +1263,7 @@ substancial, não artefato amostral.
 #| fig-cap: "Distribuição preditiva posterior do total de sinistros na carteira"
 #| fig-height: 3.8
 
-# Calcular total de sinistros previstos por amostra posterior
-exp_2014_vec <- bs_data |>
-  filter(Ano == "2014") |>
-  arrange(faixa) |>
-  pull(vit)
-
-# rate_post: matriz [draws x grupos], grupos em ordem
 rate_post_ord <- rate_post[, order(colnames(rate_post))]
-# Verificar ordem
 exp_df <- bs_data |>
   filter(Ano == "2014") |>
   arrange(faixa) |>
@@ -1265,46 +1271,51 @@ exp_df <- bs_data |>
 
 total_draws <- as.numeric(rate_post_ord %*% exp_df$vit)
 
-p_lo <- quantile(total_draws, 0.025)
-p_hi <- quantile(total_draws, 0.975)
+p_lo  <- quantile(total_draws, 0.025)
+p_hi  <- quantile(total_draws, 0.975)
 p_med <- median(total_draws)
 
 ggplot(tibble(total = total_draws), aes(x = total)) +
   geom_histogram(aes(y = after_stat(density)),
                  bins = 60, fill = "steelblue", alpha = 0.7, colour = NA) +
   geom_density(colour = "steelblue4", linewidth = 1.0) +
-  geom_vline(xintercept = p_med,   colour = "steelblue4",
+  geom_vline(xintercept = p_med, colour = "steelblue4",
              linetype = "solid",  linewidth = 1.0) +
-  geom_vline(xintercept = p_lo,    colour = "steelblue4",
+  geom_vline(xintercept = p_lo,  colour = "steelblue4",
              linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = p_hi,    colour = "steelblue4",
+  geom_vline(xintercept = p_hi,  colour = "steelblue4",
              linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = 1335, colour = "#E74C3C",
+  geom_vline(xintercept = 1335,  colour = "#E74C3C",
              linetype = "dotted", linewidth = 0.9) +
-  annotate("text", x = p_med + 5, y = 0.0035,
+  annotate("text", x = p_med - 5, y = 0.0195,
            label = sprintf("Mediana\n%.0f", p_med),
-           hjust = 0, size = 3.2, colour = "steelblue4") +
-  annotate("text", x = 1335 + 5, y = 0.003,
-           label = "Observado\n2014", hjust = 0,
-           size = 3.2, colour = "#E74C3C") +
+           hjust = 1, size = 3.2, colour = "steelblue4") +
+  annotate("text", x = 1335 + 5, y = 0.0175,
+           label = "Observado\n2014",
+           hjust = 0, size = 3.2, colour = "#E74C3C") +
+  coord_cartesian(xlim = c(1150, 1370)) +
   labs(x = "Total de sinistros previstos", y = "Densidade") +
   theme_bw(base_size = 12)
 ```
 
-A distribuição preditiva do total de sinistros é a visualização de maior
-interesse atuarial. A linha contínua azul é a mediana posterior ($\approx 1.266$);
-as linhas tracejadas delimitam o intervalo credível de 95% (IC 95% de $[1.195;\; 1.341]$); a linha pontilhada vermelha é o valor observado em 2014
-(1.335 óbitos). O observado de 2014 situa-se dentro do IC 95%, o que indica
-que o modelo é compatível com os dados mais recentes.
+A distribuição preditiva do total de sinistros é a saída de maior interesse atuarial
+deste modelo. A linha contínua azul marca a mediana posterior; as linhas tracejadas
+delimitam o IC 95% preditivo; a linha pontilhada vermelha é o observado em 2014
+(1.335 óbitos), que situa-se dentro do IC 95% mas próximo do limite superior —
+consistente com a tendência de alta que os dados revelam (taxa bruta crescendo
+$15{,}5\%$ no triênio).
 
-Para fins de provisionamento de reservas, o percentil 95% da distribuição
-preditiva ($\approx 1.341$ sinistros) representa o carregamento de segurança
-necessário para cobrir, com $95\%$ de probabilidade, o volume de sinistros
-do próximo ano dado o padrão histórico. Esse número tem interpretação direta
-como margem de segurança atuarial --- uma das aplicações mais concretas do
-modelo bayesiano hierárquico em comparação com o estimador pontual de
-Bühlmann-Straub.
+Para provisionamento de reservas, o percentil 95% da distribuição preditiva
+($\approx 1.341$ sinistros) representa o carregamento de segurança necessário
+para cobrir, com probabilidade $95\%$, o total de sinistros do próximo ano.
+A diferença entre a mediana (1.266) e o P95 (1.341) é de 75 sinistros, o que
+representa aproximadamente $6\%$ de margem sobre a estimativa central.
 
+A distribuição apresenta assimetria positiva: o observado de 2014 situa-se no
+terceiro quartil da distribuição preditiva, não na mediana. Isso é esperado e
+não indica problema de calibração — o modelo suaviza a tendência de alta recente
+por meio do encolhimento bayesiano, produzindo previsões conservadoras no
+curto prazo.
 
 ## Previsão bayesiana de sinistros
 
@@ -1317,16 +1328,16 @@ exp_2014_b <- bs_data |> filter(Ano == "2014") |>
 prev_bayes <- rate_summary |>
   left_join(exp_2014_b, by = "faixa") |>
   mutate(
-    N_bayes  = v_2014 * mediana,
-    N_lo95   = v_2014 * lo95,
-    N_hi95   = v_2014 * hi95
+    N_bayes = v_2014 * mediana,
+    N_lo95  = v_2014 * lo95,
+    N_hi95  = v_2014 * hi95
   )
 
 prev_bayes |>
   select(faixa, v_2014, N_bayes, N_lo95, N_hi95) |>
   bind_rows(
-    tibble(faixa  = "Total",
-           v_2014 = sum(prev_bayes$v_2014),
+    tibble(faixa   = "Total",
+           v_2014  = sum(prev_bayes$v_2014),
            N_bayes = sum(prev_bayes$N_bayes),
            N_lo95  = sum(prev_bayes$N_lo95),
            N_hi95  = sum(prev_bayes$N_hi95))
@@ -1348,7 +1359,7 @@ prev_bayes |>
   tab_options(table.font.size = 13)
 ```
 
-## Comparação dos três métodos
+## Comparação: Bühlmann-Straub e Bayesiano hierárquico
 
 ```{r tabela-3metodos}
 #| label: tabela-3metodos
@@ -1380,30 +1391,13 @@ prev_bayes |>
   tab_options(table.font.size = 13)
 ```
 
-O gráfico de comparação entre os dois métodos mostra que as medianas posteriores
-e os prêmios de Bühlmann-Straub são praticamente coincidentes em todas as faixas:
-as diferenças são inferiores a 0,4 sinistros em cada grupo. Esse resultado confirma
-empiricamente a equivalência teórica entre os dois estimadores quando os dados são
-informativos --- o que ocorre aqui porque todas as faixas têm exposição muito acima
-do limiar $\hat{\kappa} \approx 43$. A superposição dos pontos vermelhos (triângulos)
-e azuis (círculos) é visualmente quase perfeita, exceto em $[0,18)$ onde a ausência
-de óbitos cria uma pequena diferença na escala log entre os dois métodos.
-
-O diferencial do modelo bayesiano não está, portanto, nos valores pontuais, mas nas
-barras de erro: os intervalos credíveis de 95% são a informação que o Bühlmann-Straub
-não produz. Para $80+$, que sozinha responde por $\approx 626$ dos 1.267 sinistros
-previstos, o IC 95% é $[598;\; 656]$ --- uma amplitude de 58 sinistros que representa
-a incerteza atuarial sobre a faixa de maior impacto financeiro. Para $[60,80)$, o IC
-95% é $[487;\; 539]$, com amplitude de 52 sinistros.
-
-A comparação entre os métodos revela também uma propriedade estrutural: o modelo
-bayesiano hierárquico não exige que os parâmetros de heterogeneidade $(\sigma_u)$
-sejam fixados externamente. O Bühlmann-Straub estima $\hat{\tau}^2$ por momentos
-não-viciados, que é um estimador consistente mas de variância elevada com $m = 5$
-grupos. O modelo bayesiano regulariza essa estimação via priori sobre $\sigma_u$,
-o que é particularmente valioso em cenários onde a experiência histórica é curta
-ou onde os grupos são poucos [@lord2008; @park2010].
-
+A sobreposição quase perfeita entre os dois métodos confirma empiricamente a
+equivalência teórica. O estimador de Bühlmann-Straub é o prêmio de Bayes ótimo
+sob perda quadrática no modelo Poisson-LogNormal quando a priori é suficientemente
+informativa [@klugman2012, cap.~20]. O ganho do modelo bayesiano hierárquico não
+está nos valores pontuais, que coincidem, mas na distribuição preditiva completa
+que permite quantificar a incerteza atuarial via IC 95% e derivar carregamentos de
+segurança com interpretação probabilística direta.
 ---
 
 # Informações da Sessão
