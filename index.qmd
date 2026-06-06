@@ -34,7 +34,6 @@ execute:
 library(tidyverse)
 library(scales)
 library(gt)
-library(viridisLite)
 library(patchwork)
 
 if (!requireNamespace("mortalityAdherence", quietly = TRUE)) {
@@ -48,6 +47,8 @@ library(kableExtra)
 library(mortalityAdherence)
 library(brms)
 library(bayesplot)
+library(scico)
+library(ggiraph)
 
 
 ```
@@ -283,14 +284,28 @@ heat_df <- fundo_long |>
   filter(!is.na(log_tx), Expostos >= 5) |>
   mutate(Ano = as.numeric(Ano))
 
-ggplot(heat_df, aes(x = Ano, y = Idade, fill = log_tx)) +
-  geom_tile(width = 0.95, height = 0.95) +
-  scale_fill_viridis_c(option = "magma", name = expression(log~hat(q)[x]),
-                       direction = 1) +
+p_heatmap <- ggplot(
+  heat_df |> mutate(tooltip = sprintf("Idade: %d\nAno: %.0f\nlog(q̂ₓ) = %.2f",
+                                      Idade, Ano, log_tx)),
+  aes(x = Ano, y = Idade, fill = log_tx)
+) +
+  geom_tile_interactive(aes(tooltip = tooltip, data_id = paste(Idade, Ano)),
+                        width = 0.95, height = 0.95) +
+  scale_fill_scico(palette = "lajolla", direction = 1,
+                   name = expression(log~hat(q)[x])) +
   scale_x_continuous(breaks = c(2012, 2013, 2014)) +
   scale_y_continuous(breaks = seq(0, 110, by = 10)) +
   labs(x = "Ano", y = "Idade") +
   theme_bw(base_size = 12)
+
+girafe(
+  ggobj = p_heatmap,
+  options = list(
+    opts_hover(css = "stroke: white; stroke-width: 0.8px;"),
+    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
 ```
 
 O heatmap (superfície de Lexis discreta) apresenta o padrão típico de mortalidade
@@ -405,11 +420,16 @@ sum_d2_tx <- sum_d2 |>
   mutate(tx_tot = if_else(tot_exp > 0, tot_obt / tot_exp, NA_real_)) |>
   filter(!is.na(tx_tot), tx_tot > 0)
 
-ggplot(sum_d2_tx, aes(x = Idade, y = tx_tot, colour = faixa)) +
-  geom_point(size = 1.8) +
+p_faixas <- ggplot(
+  sum_d2_tx |>
+    mutate(tooltip = sprintf("Faixa: %s\nIdade: %d\nq̂ₓ = %.5f", faixa, Idade, tx_tot)),
+  aes(x = Idade, y = tx_tot, colour = faixa)
+) +
+  geom_point_interactive(aes(tooltip = tooltip, data_id = faixa),
+                         size = 1.8) +
   geom_vline(xintercept = c(18, 40, 60, 80),
              linetype = "dotted", colour = "grey40", linewidth = 0.7) +
-  scale_colour_viridis_d(name = "Faixa", option = "D", end = 0.9) +
+  scale_colour_scico_d(palette = "batlow", name = "Faixa") +
   scale_y_log10(
     breaks = 10^(-5:-1),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
@@ -417,6 +437,16 @@ ggplot(sum_d2_tx, aes(x = Idade, y = tx_tot, colour = faixa)) +
   scale_x_continuous(breaks = seq(0, 110, by = 10)) +
   labs(x = "Idade", y = expression(hat(q)[x]~"(escala log)")) +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
+
+girafe(
+  ggobj = p_faixas,
+  options = list(
+    opts_hover(css = "r:5px;"),
+    opts_hover_inv(css = "opacity:0.2;"),
+    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
 ```
 
 As fronteiras $x \in \{18, 40, 60, 80\}$ coincidem com inflexões ou mudanças
@@ -529,16 +559,31 @@ frame_ae |>
 #| fig-cap: "Razão A/E por faixa etária"
 #| fig-height: 3.6
 
-frame_ae |>
+ae_long <- frame_ae |>
   select(faixa, ae_at, ae_br) |>
   pivot_longer(c(ae_at, ae_br), names_to = "tabua", values_to = "ae") |>
-  mutate(tabua = recode(tabua, ae_at = "AT-2000-m", ae_br = "BR-EMSsb-m v.2021")) |>
-  ggplot(aes(x = faixa, y = ae, colour = tabua, group = tabua)) +
-  geom_line(linewidth = 0.9) + geom_point(size = 3.2) +
-  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
+  mutate(
+    tabua   = recode(tabua, ae_at = "AT-2000-m", ae_br = "BR-EMSsb-m v.2021"),
+    tooltip = sprintf("Faixa: %s\nTábua: %s\nA/E = %.3f", faixa, tabua, ae)
+  )
 
+p_ae <- ggplot(ae_long, aes(x = faixa, y = ae, colour = tabua, group = tabua)) +
+  geom_line_interactive(linewidth = 0.9) +
+  geom_point_interactive(aes(tooltip = tooltip, data_id = paste(faixa, tabua)),
+                         size = 3.5) +
+  geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40") +
   labs(x = "Faixa etária", y = "A/E") +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
+
+girafe(
+  ggobj = p_ae,
+  options = list(
+    opts_hover(css = "r:6px;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
 ```
 
 A AT-2000 superestima a mortalidade em todas as faixas (A/E $< 1$), com desvios de
@@ -1099,17 +1144,24 @@ rate_summary <- tibble(
 rate_summary <- rate_summary |>
   mutate(faixa = factor(faixa, levels = labels_fx))
 
-ggplot(rate_summary, aes(x = faixa)) +
-  # IC 95% bayesiano (barra com caps, atrás dos pontos)
+rate_plot_df <- rate_summary |>
+  mutate(
+    tip_bayes = sprintf("Grupo: %s\nBayesiano\nMediana: %.5f\nIC 95%%: [%.5f; %.5f]",
+                        faixa, mediana, lo95, hi95),
+    tip_bs    = sprintf("Grupo: %s\nBühlmann-Straub\nTaxa: %.5f",
+                        faixa, lam_BS)
+  )
+
+p_rates <- ggplot(rate_plot_df, aes(x = faixa)) +
   geom_errorbar(aes(ymin = lo95, ymax = hi95),
                 width = 0.25, linewidth = 0.8,
                 alpha = 0.5, colour = "steelblue") +
-  # Ponto B-S (triângulo, ligeiramente menor para não cobrir o círculo)
-  geom_point(aes(y = lam_BS, colour = "Bühlmann-Straub"),
-             size = 3.5, shape = 17) +
-  # Ponto bayesiano (círculo, por cima)
-  geom_point(aes(y = mediana, colour = "Bayesiano"),
-             size = 3.0, shape = 16) +
+  geom_point_interactive(aes(y = lam_BS, colour = "Bühlmann-Straub",
+                             tooltip = tip_bs, data_id = paste(faixa, "bs")),
+                         size = 3.5, shape = 17) +
+  geom_point_interactive(aes(y = mediana, colour = "Bayesiano",
+                             tooltip = tip_bayes, data_id = paste(faixa, "bayes")),
+                         size = 3.0, shape = 16) +
   scale_colour_manual(name = NULL,
     values = c("Bayesiano" = "steelblue", "Bühlmann-Straub" = "#E74C3C")) +
   scale_y_log10(
@@ -1119,13 +1171,22 @@ ggplot(rate_summary, aes(x = faixa)) +
   labs(x = "Grupo", y = "Taxa estimada (escala log)") +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom")
+
+girafe(
+  ggobj = p_rates,
+  options = list(
+    opts_hover(css = "r:6px;"),
+    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
 ```
 
-O gráfico sobrepõe as taxas de Bühlmann-Straub (triângulos vermelhos, ligeiramente
-à direita) e as medianas posteriores do modelo bayesiano (círculos azuis, ligeiramente
-à esquerda) com barras de erro mostrando o intervalo credível de 95% para cada grupo.
-O deslocamento horizontal de $\pm 0{,}12$ evita sobreposição dos pontos e permite
-comparar visualmente os dois métodos em cada faixa.
+O gráfico sobrepõe as taxas de Bühlmann-Straub (triângulos vermelhos) e as medianas
+posteriores do modelo bayesiano (círculos azuis) na mesma posição horizontal por grupo,
+com barras de erro verticais indicando o intervalo credível de 95% para cada faixa.
+A sobreposição intencional dos dois pontos revela diretamente o grau de concordância
+entre os métodos.
 
 A sobreposição quase perfeita dos pontos em todas as faixas confirma empiricamente
 a equivalência teórica entre os dois estimadores: as diferenças pontuais são inferiores
