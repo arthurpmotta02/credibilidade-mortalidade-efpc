@@ -1,7 +1,7 @@
 ---
 title: "Teoria da Credibilidade --- Laboratório 2, Parte 1 (2026/1)"
 subtitle: "Previsão de Mortalidade em Fundo de Pensão via Bühlmann-Straub"
-author: "Arthur Pontes Motta"
+author: "Arthur Pontes Motta e Catarine Martins"
 date: today
 lang: pt
 bibliography: referencias.bib

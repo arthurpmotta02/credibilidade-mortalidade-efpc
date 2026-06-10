@@ -3,7 +3,7 @@
 **Previsão de Mortalidade em Fundo de Pensão via Bühlmann-Straub**
 
 > Disciplina: Teoria da Credibilidade (2026/1) — DME/IM-UFRJ  
-> Autor: Arthur Pontes Motta  
+> Autor: Arthur Pontes Motta e Catarine Martins
 > Professora: Viviana G. R. Lobo
 
 ---
