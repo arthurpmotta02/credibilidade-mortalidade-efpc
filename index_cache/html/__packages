@@ -20,8 +20,8 @@ gt
 patchwork
 kableExtra
 mortalityAdherence
-Rcpp
-brms
+StanHeaders
+rstan
 bayesplot
 scico
 ggiraph

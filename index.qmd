@@ -45,11 +45,10 @@ if (!requireNamespace("mortalityAdherence", quietly = TRUE)) {
 }
 library(kableExtra)
 library(mortalityAdherence)
-library(brms)
+library(rstan)
 library(bayesplot)
 library(scico)
 library(ggiraph)
-
 
 ```
 
@@ -264,20 +263,20 @@ de choques na composição da carteira no período.
 
 ```{r g-logtx}
 #| label: g-logtx
-#| fig-cap: "Log da taxa de mortalidade por idade e ano (2012--2014)"
+#| fig-cap: "Log da taxa central de mortalidade por idade e ano (2012--2014)"
 #| fig-height: 4.2
 
 ggplot(fundo_long |> filter(!is.na(log_tx)),
        aes(x = Idade, y = log_tx, colour = Ano)) +
   geom_line(linewidth = 0.9) +
   scale_x_continuous(breaks = seq(0, 110, by = 10)) +
-  labs(x = "Idade", y = expression(log~hat(q)[x]), colour = NULL) +
+  labs(x = "Idade", y = expression(log~hat(m)[x]), colour = NULL) +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
 ```
 
 ```{r g-heatmap}
 #| label: g-heatmap
-#| fig-cap: "Heatmap de log(taxa de mortalidade) por idade e ano — superfície de Lexis"
+#| fig-cap: "Heatmap de log(taxa central de mortalidade) por idade e ano — superfície de Lexis"
 #| fig-height: 3.5
 
 heat_df <- fundo_long |>
@@ -285,14 +284,14 @@ heat_df <- fundo_long |>
   mutate(Ano = as.numeric(Ano))
 
 p_heatmap <- ggplot(
-  heat_df |> mutate(tooltip = sprintf("Idade: %d\nAno: %.0f\nlog(q̂ₓ) = %.2f",
+  heat_df |> mutate(tooltip = sprintf("Idade: %d\nAno: %.0f\nlog(m\u0302\u2093) = %.2f",
                                       Idade, Ano, log_tx)),
   aes(x = Ano, y = Idade, fill = log_tx)
 ) +
   geom_tile_interactive(aes(tooltip = tooltip, data_id = paste(Idade, Ano)),
                         width = 0.95, height = 0.95) +
   scale_fill_scico(palette = "lajolla", direction = 1,
-                   name = expression(log~hat(q)[x])) +
+                   name = expression(log~hat(m)[x])) +
   scale_x_continuous(breaks = c(2012, 2013, 2014)) +
   scale_y_continuous(breaks = seq(0, 110, by = 10)) +
   labs(x = "Ano", y = "Idade") +
@@ -316,14 +315,132 @@ específico. Com apenas $T = 3$ períodos, o heatmap serve para diagnóstico de
 consistência; a inferência de tendência temporal de melhoria de mortalidade requer
 horizontes mais longos [@rau2018].
 
-A curva do log da taxa exibe três segmentos: mínimo entre 5 e 15 anos
-($\log\hat{q}_x \approx -10$), elevação suave entre 15 e 25 anos por causas
+A curva do log da taxa central exibe três segmentos: mínimo entre 5 e 15 anos
+($\log\hat{m}_x \approx -10$), elevação suave entre 15 e 25 anos por causas
 externas, e crescimento aproximadamente linear acima dos 25 anos, compatível com
-a lei de Gompertz — $q_x \propto e^{\beta x}$, com $\beta \approx 0{,}09$ por
+a lei de Gompertz — $m_x \propto e^{\beta x}$, com $\beta \approx 0{,}09$ por
 ano. Nas idades acima de 90 anos as curvas anuais divergem, pois $E_x \leq 5$
-em muitas células: um único óbito adicional desloca $\log\hat{q}_x$ em
+em muitas células: um único óbito adicional desloca $\log\hat{m}_x$ em
 $\log 2 \approx 0{,}7$ unidades, argumento direto para agregar essas idades num
 único grupo de risco.
+
+## Evolução dos óbitos anuais por faixa etária
+
+```{r g-obitos-faixas}
+#| label: g-obitos-faixas
+
+if (!requireNamespace("gtExtras", quietly = TRUE))
+  install.packages("gtExtras", repos = "https://cloud.r-project.org", quiet = TRUE)
+library(gtExtras)
+
+intervalos_q1 <- c(0, 18, 40, 60, 80, 116)
+labels_fx_q1  <- c("[0, 18)", "[18, 40)", "[40, 60)", "[60, 80)", "80+")
+
+box_df <- fundo_long |>
+  mutate(faixa = cut(Idade, breaks = intervalos_q1, right = FALSE,
+                     labels = labels_fx_q1)) |>
+  filter(!is.na(faixa)) |>
+  group_by(faixa, Ano) |>
+  summarise(Obitos = sum(Obitos), .groups = "drop") |>
+  mutate(faixa = factor(faixa, levels = labels_fx_q1))
+
+spark_df <- box_df |>
+  group_by(faixa) |>
+  summarise(
+    `2012`    = Obitos[Ano == "2012"],
+    `2013`    = Obitos[Ano == "2013"],
+    `2014`    = Obitos[Ano == "2014"],
+    CV        = if_else(mean(Obitos) > 0,
+                        round(sd(Obitos) / mean(Obitos) * 100, 1),
+                        NA_real_),
+    tendencia = list(Obitos),
+    .groups   = "drop"
+  )
+
+spark_df |>
+  gt() |>
+  tab_header(
+    title    = "Óbitos anuais por faixa etária (2012–2014)",
+    subtitle = "A coluna Trajetória mostra a evolução 2012 → 2013 → 2014"
+  ) |>
+  cols_label(
+    faixa     = "Faixa",
+    `2012`    = "2012",
+    `2013`    = "2013",
+    `2014`    = "2014",
+    CV        = "CV (%)",
+    tendencia = "Trajetória"
+  ) |>
+  gt_plt_sparkline(
+    tendencia,
+    type       = "shaded",
+    same_limit = FALSE,
+    palette    = c("steelblue4", "steelblue2", "steelblue4", "white", "steelblue1")
+  ) |>
+  sub_missing(columns = CV, missing_text = "—") |>
+  fmt_number(columns = c(`2012`, `2013`, `2014`), decimals = 0) |>
+  tab_style(
+    style     = cell_fill(color = "#FFF9C4"),
+    locations = cells_body(rows = !is.na(CV) & CV > 15)
+  ) |>
+  tab_style(
+    style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
+    locations = cells_body(rows = faixa == "80+")
+  ) |>
+  tab_style(
+    style     = cell_text(color = "grey50", style = "italic"),
+    locations = cells_body(rows = faixa == "[0, 18)")
+  ) |>
+  cols_align(align = "center", columns = c(`2012`, `2013`, `2014`, CV)) |>
+  tab_options(
+    table.font.size        = 13,
+    table.width            = pct(80),
+    column_labels.font.weight = "bold",
+    heading.subtitle.font.size = 11
+  )
+```
+
+A tabela com sparklines comprime em uma linha por grupo toda a informação relevante:
+os três valores anuais, o CV e a trajetória visual. A faixa $80+$ (destacada em azul)
+exibe crescimento monotônico (524 → 583 → 683), sinal do envelhecimento progressivo
+da carteira. A faixa $[18, 40)$ tem CV elevado ($22{,}4\%$, destacado em amarelo)
+por oscilar sobre uma base pequena de 22–34 óbitos/ano. A faixa $[0, 18)$ registra
+zero óbitos nos três anos — sua taxa credibilizada virá inteiramente do nível
+coletivo $\hat{\lambda}_0$.
+
+## Curva de sobrevivência acumulada
+
+```{r g-sobrevivencia}
+#| label: g-sobrevivencia
+#| fig-cap: "Função de sobrevivência acumulada $l_x$ a partir das taxas centrais observadas (triênio 2012--2014)"
+#| fig-height: 4.0
+
+# lx construída a partir das mx do triênio acumulado
+lx_df <- sum_d2 |>
+  arrange(Idade) |>
+  mutate(
+    mx   = if_else(tot_exp > 0, tot_obt / tot_exp, 0),
+    px   = exp(-mx),           # probabilidade de sobreviver 1 ano (força constante)
+    lx   = cumprod(c(1, px[-n()])) * 100000   # radix = 100.000
+  )
+
+ggplot(lx_df |> filter(Idade <= 110), aes(x = Idade, y = lx)) +
+  geom_line(linewidth = 1.0, colour = "steelblue4") +
+  geom_area(alpha = 0.15, fill = "steelblue") +
+  geom_vline(xintercept = c(18, 40, 60, 80),
+             linetype = "dotted", colour = "grey40", linewidth = 0.7) +
+  scale_x_continuous(breaks = seq(0, 110, by = 10)) +
+  scale_y_continuous(labels = scales::comma_format(big.mark = ".")) +
+  labs(x = "Idade", y = expression(italic(l)[x]~"(radix = 100.000)")) +
+  theme_bw(base_size = 12)
+```
+
+A curva $l_x$ parte de 100.000 nascidos vivos e decresce de acordo com as taxas
+centrais observadas no triênio, sob a hipótese de força de mortalidade constante
+dentro de cada ano de idade ($p_x = e^{-\hat{m}_x}$). A queda mais acentuada
+ocorre acima dos 60 anos, com a curva atingindo $\approx 25{,}000$ aos 80 anos —
+consistente com o índice de dependência de $0{,}26$ calculado anteriormente.
+As linhas pontilhadas marcam as fronteiras das faixas etárias definidas na questão (ii).
 
 ---
 
@@ -388,7 +505,7 @@ sum_faixas |>
     faixa    = "Faixa",
     tot_obt  = "Óbitos",
     tot_exp  = "Expostos",
-    tx_media = md("$\\hat{q}$ média"),
+    tx_media = md("$\\hat{m}$ média"),
     pct_exp  = "% Expostos",
     pct_obt  = "% Óbitos",
     cv       = "CV óbitos anuais"
@@ -413,7 +530,7 @@ nível coletivo $\lambda_0$.
 
 ```{r g-faixas-logtx}
 #| label: g-faixas-logtx
-#| fig-cap: "Taxa de mortalidade total com fronteiras das faixas de risco (eixo log)"
+#| fig-cap: "Taxa central de mortalidade total com fronteiras das faixas de risco (eixo log)"
 #| fig-height: 4.2
 
 sum_d2_tx <- sum_d2 |>
@@ -422,7 +539,7 @@ sum_d2_tx <- sum_d2 |>
 
 p_faixas <- ggplot(
   sum_d2_tx |>
-    mutate(tooltip = sprintf("Faixa: %s\nIdade: %d\nq̂ₓ = %.5f", faixa, Idade, tx_tot)),
+    mutate(tooltip = sprintf("Faixa: %s\nIdade: %d\nm\u0302\u2093 = %.5f", faixa, Idade, tx_tot)),
   aes(x = Idade, y = tx_tot, colour = faixa)
 ) +
   geom_point_interactive(aes(tooltip = tooltip, data_id = faixa),
@@ -435,7 +552,7 @@ p_faixas <- ggplot(
     labels = scales::trans_format("log10", scales::math_format(10^.x))
   ) +
   scale_x_continuous(breaks = seq(0, 110, by = 10)) +
-  labs(x = "Idade", y = expression(hat(q)[x]~"(escala log)")) +
+  labs(x = "Idade", y = expression(hat(m)[x]~"(escala log)")) +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
 
 girafe(
@@ -485,10 +602,14 @@ Avaliamos:
 at2000 <- read.csv("at2000.iba.csv",    header = TRUE, dec = ",")
 brems  <- read.csv("brems2021.iba.csv", header = TRUE, dec = ",")
 
+# Os dados fornecem a taxa central mx = Dx/Ex. As tábuas de referência estão
+# em qx. Convertemos: qx_obs = 1 - exp(-mx), para que a comparação e a razão
+# A/E sejam conceitualmente coerentes (observado e esperado na mesma escala).
 frame_comp <- sum_d2 |>
   select(Idade, tot_obt, tot_exp) |>
   mutate(
-    tx_obs   = if_else(tot_exp > 0, tot_obt / tot_exp, NA_real_),
+    mx_obs   = if_else(tot_exp > 0, tot_obt / tot_exp, NA_real_),
+    qx_obs   = if_else(!is.na(mx_obs), 1 - exp(-mx_obs), NA_real_),
     at2000_m = at2000$at2000.m,
     brems_m  = brems$brems2021sb.m[1:116],
     obt_at   = tot_exp * at2000_m,
@@ -500,11 +621,11 @@ frame_comp <- sum_d2 |>
 
 ```{r g-tabuas}
 #| label: g-tabuas
-#| fig-cap: "Comparação das tábuas com a experiência observada"
+#| fig-cap: "Comparação das tábuas com a experiência observada (escala log; observado convertido para $\\hat{q}_x = 1 - e^{-\\hat{m}_x}$)"
 #| fig-height: 4.5
 
-ggplot(frame_comp |> filter(!is.na(tx_obs), tx_obs > 0), aes(x = Idade)) +
-  geom_point(aes(y = tx_obs, colour = "Observado"), size = 1.2, alpha = 0.55) +
+ggplot(frame_comp |> filter(!is.na(qx_obs), qx_obs > 0), aes(x = Idade)) +
+  geom_point(aes(y = qx_obs, colour = "Observado"), size = 1.2, alpha = 0.55) +
   geom_line(aes(y = at2000_m, colour = "AT-2000-m"), linewidth = 0.95) +
   geom_line(aes(y = brems_m,  colour = "BR-EMSsb-m v.2021"), linewidth = 0.95) +
 
@@ -518,6 +639,18 @@ ggplot(frame_comp |> filter(!is.na(tx_obs), tx_obs > 0), aes(x = Idade)) +
 ```
 
 ## Razão A/E por faixa etária
+
+Os dados do fundo fornecem diretamente a **taxa central de mortalidade**
+$\hat{m}_x = D_x / E_x$, enquanto as tábuas AT-2000 e BR-EMSsb-m estão
+calibradas em **probabilidade de morte** $q_x$. Para que a comparação e a razão
+A/E sejam conceitualmente coerentes — observado e esperado medidos na mesma
+escala — convertemos a taxa central observada por meio da relação de força constante:
+
+$$
+\hat{q}_x = 1 - e^{-\hat{m}_x}.
+$$
+
+A razão A/E por faixa agrega os esperados ponderados pela exposição:
 
 $$
 \text{A/E}_j = \frac{\sum_{x \in j} D_x}{\sum_{x \in j} E_x \cdot q_x^{\text{tábua}}}
@@ -706,7 +839,7 @@ tibble(
   cols_label(
     Grupo="Grupo", Faixa="Faixa", Descrição="Caracterização",
     tot_exp="Expostos totais", tot_obt="Óbitos totais",
-    tx_media=md("$\\hat{q}$ média")
+    tx_media=md("$\\hat{m}$ média")
   ) |>
   fmt_number(columns = c(tot_exp, tot_obt), decimals = 0) |>
   fmt_number(columns = tx_media, decimals = 6) |>
@@ -720,7 +853,7 @@ tibble(
 ## Formulação do modelo
 
 Seguindo @buhlmann2005 e @klugman2012, define-se para cada grupo de risco $i = 1, \ldots, m$
-e período $t = 1, 2, 3$:
+e período $t = 1, 2$:
 
 $$
 F_{it} = \frac{N_{it}}{v_{it}}, \qquad
@@ -738,6 +871,10 @@ e $\sigma^2(\theta_i) = \lambda(\theta_i)$. Os parâmetros estruturais reduzem-s
 a apenas dois: o nível global $\lambda_0$ e a variância entre grupos $\tau^2$,
 com $\sigma^2 = \lambda_0$ [@buhlmann2005, cap.~4].
 
+O modelo é **ajustado com os dados de 2012 e 2013** ($T = 2$) e a previsão para
+2014 é confrontada com os óbitos efetivamente observados nesse ano, servindo
+como validação fora da amostra.
+
 ## Estimação iterativa de $\lambda_0$ e $\tau^2$
 
 Como os estimadores de $\lambda_0$ e $\tau^2$ são mutuamente dependentes, a
@@ -749,20 +886,22 @@ c_1 = \frac{m-1}{m}\left\{\sum_i \frac{v_i}{v}\left(1 - \frac{v_i}{v}\right)\rig
 c_2 = \frac{m}{m-1}\sum_i \frac{v_i}{v}\left(\bar{F}_i^v - \bar{\bar{F}}^v\right)^2,
 $$
 
-onde $v_i = \sum_t v_{it}$ e $v = \sum_i v_i = 417\,964$; a frequência
-volume-ponderada do grupo $i$ é $\bar{F}_i^v = \sum_t (v_{it}/v_i)\,F_{it}$;
-e $\bar{\bar{F}}^v = \sum_i (v_i/v)\,\bar{F}_i^v$ é a média global.
+onde $v_i = \sum_{t=1}^{2} v_{it}$ e $v = \sum_i v_i$ (total de pessoas-ano em
+2012--2013); a frequência volume-ponderada do grupo $i$ é
+$\bar{F}_i^v = \sum_t (v_{it}/v_i)\,F_{it}$; e $\bar{\bar{F}}^v = \sum_i (v_i/v)\,\bar{F}_i^v$
+é a média global.
 
 O algoritmo inicia com $\hat{\lambda}_0^{(0)} = \bar{\bar{F}}^v$ e itera:
 
 $$
-\hat{\kappa}^{(k)} = \frac{\hat{\lambda}_0^{(k)}}{\hat{\tau}^{2(k)}},
+\begin{aligned}
+\hat{\kappa}^{(k)} &= \frac{\hat{\lambda}_0^{(k)}}{\hat{\tau}^{2(k)}},
 \qquad
-\hat{\omega}_i^{(k)} = \frac{v_i}{v_i + \hat{\kappa}^{(k)}},
+\hat{\omega}_i^{(k)} = \frac{v_i}{v_i + \hat{\kappa}^{(k)}},\\[6pt]
+\hat{\lambda}_0^{(k+1)} &= \sum_i \frac{\hat{\omega}_i^{(k)}}{\hat{\omega}^{(k)}}\,\bar{F}_i^v,
 \qquad
-\hat{\lambda}_0^{(k+1)} = \sum_i \frac{\hat{\omega}_i^{(k)}}{\hat{\omega}^{(k)}}\,\bar{F}_i^v,
-\qquad
-\hat{\tau}^{2(k+1)} = c_1\!\left(c_2 - \frac{m\hat{\lambda}_0^{(k)}}{v}\right).
+\hat{\tau}^{2(k+1)} = \max\!\left\{0,\; c_1\!\left(c_2 - \frac{m\hat{\lambda}_0^{(k)}}{v}\right)\right\}.
+\end{aligned}
 $$
 
 ```{r bs-estimacao}
@@ -770,7 +909,7 @@ $$
 
 intervalos_num <- c(0, 18, 40, 60, 80, 116)
 
-# Dados por grupo e ano
+# Dados por grupo e ano — TODOS os 3 anos (necessário para previsão e validação)
 bs_data <- fundo_long |>
   mutate(faixa = cut(Idade, breaks = intervalos_num, right = FALSE,
                      labels = labels_fx)) |>
@@ -779,19 +918,21 @@ bs_data <- fundo_long |>
   summarise(vit = sum(Expostos), Nit = sum(Obitos), .groups = "drop") |>
   mutate(Fit = if_else(vit > 0, Nit / vit, 0))
 
-# vi, Fbar_i^v
-vi_df <- bs_data |>
+# ── AJUSTE: apenas 2012 e 2013 ──────────────────────────────────────────────
+bs_ajuste <- bs_data |> filter(Ano %in% c("2012", "2013"))
+
+vi_df <- bs_ajuste |>
   group_by(faixa) |>
   summarise(
-    vi    = sum(vit),
-    Ni    = sum(Nit),
+    vi     = sum(vit),
+    Ni     = sum(Nit),
     Fbar_v = sum(vit * Fit) / sum(vit),
     .groups = "drop"
   )
 v_total <- sum(vi_df$vi)
 m       <- nrow(vi_df)
 
-# Fbarbar (media global volume-ponderada)
+# Fbarbar (média global volume-ponderada, 2012-2013)
 Fbarbar <- sum(vi_df$vi * vi_df$Fbar_v) / v_total
 
 # c1, c2
@@ -799,45 +940,43 @@ c1_denom <- sum((vi_df$vi / v_total) * (1 - vi_df$vi / v_total))
 c1 <- ((m - 1) / m) / c1_denom
 c2 <- (m / (m - 1)) * sum((vi_df$vi / v_total) * (vi_df$Fbar_v - Fbarbar)^2)
 
-cat(sprintf("v = %d | m = %d | Fbarbar = %.6f\n", v_total, m, Fbarbar))
+cat(sprintf("Ajuste: 2012-2013 | v = %d | m = %d | F̄̄ = %.6f\n",
+            v_total, m, Fbarbar))
 cat(sprintf("c1 = %.6f | c2 = %.8f\n", c1, c2))
 
 # Algoritmo iterativo
 lam0 <- Fbarbar
-tau2 <- c1 * (c2 - m * lam0 / v_total)
-iter_log <- tibble(k=0, lam0=lam0, tau2=tau2)
+tau2 <- max(0, c1 * (c2 - m * lam0 / v_total))
+iter_log <- tibble(k = 0, lam0 = lam0, tau2 = tau2)
 
-for (k in seq_len(30)) {
-  if (tau2 <= 0) { tau2 <- 0; break }
-  kappa   <- lam0 / tau2
-  omega_i <- vi_df$vi / (vi_df$vi + kappa)
+for (k in seq_len(50)) {
+  if (tau2 <= 0) break
+  kappa    <- lam0 / tau2
+  omega_i  <- vi_df$vi / (vi_df$vi + kappa)
   lam0_new <- sum(omega_i / sum(omega_i) * vi_df$Fbar_v)
-  tau2_new <- c1 * (c2 - m * lam0 / v_total)
-  iter_log <- bind_rows(iter_log, tibble(k=k, lam0=lam0_new, tau2=tau2_new))
-  if (abs(lam0_new - lam0) < 1e-10) { lam0 <- lam0_new; tau2 <- tau2_new; break }
+  tau2_new <- max(0, c1 * (c2 - m * lam0_new / v_total))
+  iter_log <- bind_rows(iter_log, tibble(k = k, lam0 = lam0_new, tau2 = tau2_new))
+  if (abs(lam0_new - lam0) < 1e-10 && abs(tau2_new - tau2) < 1e-12) {
+    lam0 <- lam0_new; tau2 <- tau2_new; break
+  }
   lam0 <- lam0_new; tau2 <- tau2_new
 }
 
 cat(sprintf("\nConvergência em %d iterações\n", nrow(iter_log) - 1))
 cat(sprintf("lambda0_hat = %.8f\n", lam0))
 cat(sprintf("tau2_hat    = %.8f\n", tau2))
-cat(sprintf("kappa_hat   = %.4f\n", lam0 / tau2))
+cat(sprintf("kappa_hat   = %.4f\n",  lam0 / tau2))
 
-# Tabela de iterações
 iter_log |>
-  head(6) |>
+  head(8) |>
   gt() |>
-  tab_header(title = "Trajetória do algoritmo iterativo") |>
-  cols_label(k = "Iteração",
+  tab_header(title = "Trajetória do algoritmo iterativo (ajuste 2012--2013)") |>
+  cols_label(k    = "Iteração",
              lam0 = md("$\\hat{\\lambda}_0^{(k)}$"),
              tau2 = md("$\\hat{\\tau}^{2(k)}$")) |>
   fmt_number(columns = c(lam0, tau2), decimals = 8) |>
   tab_options(table.font.size = 13)
 ```
-
-O algoritmo converge em 5 iterações. A tabela acima mostra que $\hat{\lambda}_0$
-se estabiliza rapidamente em $\approx 0{,}0179$ e $\hat{\tau}^2$ em
-$\approx 0{,}000415$.
 
 ## Parâmetros estruturais e fatores de credibilidade
 
@@ -848,8 +987,8 @@ kappa_hat <- lam0 / tau2
 
 resultados <- vi_df |>
   mutate(
-    omega_i   = vi / (vi + kappa_hat),
-    lam_cred  = omega_i * Fbar_v + (1 - omega_i) * lam0
+    omega_i  = vi / (vi + kappa_hat),
+    lam_cred = omega_i * Fbar_v + (1 - omega_i) * lam0
   )
 
 tibble(
@@ -862,7 +1001,7 @@ tibble(
   Valor = c(lam0, tau2, lam0, kappa_hat)
 ) |>
   gt() |>
-  tab_header(title = "Parâmetros estruturais estimados") |>
+  tab_header(title = "Parâmetros estruturais estimados (ajuste 2012--2013)") |>
   cols_label(Parâmetro = md("Parâmetro")) |>
   fmt_markdown(columns = Parâmetro) |>
   fmt_number(columns = Valor, decimals = 6) |>
@@ -892,15 +1031,15 @@ resultados |>
   ) |>
   cols_label(
     faixa        = "Grupo",
-    vi           = md("$v_i$ (exposição)"),
+    vi           = md("$v_i$ (exposição 2012--13)"),
     Fbar_v       = md("$\\bar{F}_i^v$ (taxa bruta)"),
     omega_i      = md("$\\hat{\\omega}_i$"),
     lam_cred     = md("$\\hat{\\lambda}_i^H$ (taxa credibilizada)"),
     shrink_label = "Encolhimento"
   ) |>
-  fmt_number(columns = vi,                   decimals = 0)     |>
-  fmt_number(columns = c(Fbar_v, lam_cred),  decimals = 6)     |>
-  fmt_number(columns = omega_i,              decimals = 6)     |>
+  fmt_number(columns = vi,                   decimals = 0) |>
+  fmt_number(columns = c(Fbar_v, lam_cred),  decimals = 6) |>
+  fmt_number(columns = omega_i,              decimals = 6) |>
   tab_style(
     style     = cell_fill(color = "#EBF5FB"),
     locations = cells_body(rows = omega_i < 0.999)
@@ -912,94 +1051,187 @@ resultados |>
   tab_options(table.font.size = 13)
 ```
 
-$\hat{\kappa} \approx 43{,}2$ implica que um grupo precisa de apenas 43 pessoas-ano
-de exposição para que $50\%$ do peso recaia sobre sua própria experiência.
-Como todas as faixas têm $v_i$ muito acima desse limiar, os fatores de credibilidade
-são altos: $\hat{\omega}_i > 0{,}999$ para os quatro grupos com óbitos positivos,
-e $\hat{\omega}_{[0,18)} = 0{,}9597$ para a única faixa sem óbitos.
+$\hat{\kappa}$ pequeno significa heterogeneidade entre grupos grande em relação ao
+ruído de processo ($\hat{\tau}^2/\hat{\sigma}^2 = 1/\hat{\kappa}$): as taxas de
+mortalidade variam muito mais entre faixas etárias do que dentro de cada faixa ao
+longo dos anos. Como todas as $v_i$ superam $\hat{\kappa}$ em várias ordens de
+grandeza, os fatores de credibilidade $\hat{\omega}_i$ são próximos de 1 para os
+grupos com óbitos positivos. O único grupo com encolhimento substantivo é $[0, 18)$:
+com zero óbitos em 2012--2013, sua taxa credibilizada provém inteiramente do
+nível coletivo $\hat{\lambda}_0$.
 
-A coluna de encolhimento quantifica o ajuste que o estimador de credibilidade aplica
-à taxa bruta de cada grupo. Para as faixas $[18, 40)$, $[40, 60)$ e $[60, 80)$ o
-encolhimento é inferior a $1\%$ em valor absoluto: a experiência própria é suficientemente
-robusta para que $\hat{\lambda}_i^H \approx \bar{F}_i^v$. Para $80+$ o encolhimento de
-$-0{,}12\%$ é negativo porque $\hat{\lambda}_0 < \bar{F}_{80+}^v$: o pequeno peso
-do nível coletivo puxa a estimativa levemente para baixo. O único grupo com encolhimento
-substantivo é $[0, 18)$: com $\bar{F}_{[0,18)}^v = 0$ (zero óbitos no triênio), a taxa
-credibilizada $\hat{\lambda}_{[0,18)}^H = (1 - 0{,}9597)\,\hat{\lambda}_0 \approx
-0{,}000722$ provém inteiramente da contribuição do nível coletivo.
+## Previsão para 2014 e validação fora da amostra
 
-O fato de todos os $\hat{\omega}_i$ estarem próximos de 1 decorre de $\hat{\kappa}
-\approx 43{,}2$ ser muito pequeno em relação às exposições observadas.
-$\hat{\kappa}$ pequeno significa que a heterogeneidade entre grupos
-($\hat{\tau}^2 \approx 0{,}000415$) é grande em relação ao ruído de processo
-($\hat{\sigma}^2 = \hat{\lambda}_0 \approx 0{,}018$), com razão
-$\hat{\tau}^2/\hat{\sigma}^2 = 1/\hat{\kappa} \approx 2{,}3\%$.
-Em termos práticos: qualquer fundo de pensão com perfil etário semelhante a este
-alcançaria credibilidade quase total com poucos meses de exposição por faixa.
-## Previsão de sinistros para o próximo ano
-
-O número esperado de sinistros para o grupo $i$ no próximo período com exposição
-projetada $v_i^* = E_{i,2015}^{*}$ é:
+O número esperado de sinistros para o grupo $i$ em 2014, usando a exposição
+observada nesse ano como $v_i^*$, é:
 
 $$
-\hat{N}_i^* = v_i^* \cdot \hat{\lambda}_i^H.
+\hat{N}_i^* = v_{i,2014} \cdot \hat{\lambda}_i^H.
 $$
-
-Adota-se como projeção de exposição o valor observado em 2014 (último ano
-disponível).
 
 ```{r previsao}
 #| label: previsao
 
-exp_2014 <- bs_data |> filter(Ano == "2014") |>
-  select(faixa, v_2014 = vit)
+# Exposição e óbitos observados em 2014 (validação)
+val_2014 <- bs_data |>
+  filter(Ano == "2014") |>
+  select(faixa, v_2014 = vit, N_obs_2014 = Nit)
 
 previsao <- resultados |>
-  left_join(exp_2014, by = "faixa") |>
-  mutate(N_prev = v_2014 * lam_cred)
+  left_join(val_2014, by = "faixa") |>
+  mutate(
+    N_prev   = v_2014 * lam_cred,
+    erro_pct = if_else(N_obs_2014 > 0,
+                       (N_prev - N_obs_2014) / N_obs_2014 * 100,
+                       NA_real_)
+  )
 
 previsao |>
-  select(faixa, v_2014, lam_cred, N_prev) |>
+  select(faixa, v_2014, lam_cred, N_prev, N_obs_2014, erro_pct) |>
   bind_rows(
-    tibble(faixa    = "Total",
-           v_2014   = sum(previsao$v_2014),
-           lam_cred = NA_real_,
-           N_prev   = sum(previsao$N_prev))
+    tibble(faixa       = "Total",
+           v_2014      = sum(previsao$v_2014),
+           lam_cred    = NA_real_,
+           N_prev      = sum(previsao$N_prev),
+           N_obs_2014  = sum(previsao$N_obs_2014),
+           erro_pct    = (sum(previsao$N_prev) - sum(previsao$N_obs_2014)) /
+                          sum(previsao$N_obs_2014) * 100)
   ) |>
-  mutate(faixa = if_else(is.na(faixa), "Total", as.character(faixa))) |>
   gt() |>
-  tab_header(title = "Previsão de sinistros para o próximo ano") |>
-  cols_label(
-    faixa    = "Grupo",
-    v_2014   = md("$v_i^*$ (exposição 2014)"),
-    lam_cred = md("$\\hat{\\lambda}_i^H$"),
-    N_prev   = md("$\\hat{N}_i^*$")
+  tab_header(
+    title    = "Previsão para 2014 vs. observado (validação fora da amostra)",
+    subtitle = "Ajuste com 2012--2013; validação em 2014"
   ) |>
-  fmt_number(columns = v_2014, decimals = 0) |>
-  fmt_number(columns = lam_cred, decimals = 6) |>
-  fmt_number(columns = N_prev, decimals = 1) |>
-  sub_missing(columns = lam_cred, missing_text = "---") |>
+  cols_label(
+    faixa      = "Grupo",
+    v_2014     = md("$v_i^*$ (exp. 2014)"),
+    lam_cred   = md("$\\hat{\\lambda}_i^H$"),
+    N_prev     = md("$\\hat{N}_i^*$ (previsto)"),
+    N_obs_2014 = md("$N_i^{\\text{obs}}$ (2014)"),
+    erro_pct   = "Erro (%)"
+  ) |>
+  fmt_number(columns = v_2014,    decimals = 0) |>
+  fmt_number(columns = lam_cred,  decimals = 6) |>
+  fmt_number(columns = c(N_prev, N_obs_2014), decimals = 1) |>
+  fmt_number(columns = erro_pct,  decimals = 1) |>
+  sub_missing(columns = c(lam_cred, erro_pct), missing_text = "—") |>
   tab_style(
     style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
-    locations = cells_body(rows = is.na(lam_cred))
+    locations = cells_body(rows = faixa == "Total")
+  ) |>
+  tab_style(
+    style     = cell_fill("#FFF9C4"),
+    locations = cells_body(columns = erro_pct, rows = abs(erro_pct) > 5)
   ) |>
   tab_options(table.font.size = 13)
 ```
 
-O modelo prevê $\approx \mathbf{1.267}$ sinistros para o próximo ano com a exposição
-de 2014. Para referência, foram observados 1.335 óbitos em 2014. A diferença de
-$\approx 68$ sinistros (subestimação de $5{,}1\%$) reflete o papel da credibilidade:
-o encolhimento em direção a $\hat{\lambda}_0$ modera as estimativas das faixas com
-taxas acima do coletivo ($[60, 80)$ e $80+$), reduzindo a previsão em relação a
-simplesmente projetar as taxas brutas de 2014.
+A previsão total de 2014, obtida com modelo ajustado apenas em 2012--2013,
+é comparada ao número de óbitos efetivamente observados. O erro percentual global
+mede o desempenho preditivo fora da amostra: desvios abaixo de $5\%$ em módulo
+indicam boa calibração do estimador de credibilidade para esse horizonte de um ano.
+As faixas com maior volume ($[40, 60)$ e $[60, 80)$) tendem a apresentar erros
+menores, pois a razão $v_i/\hat{\kappa}$ é mais elevada e a credibilidade é
+mais alta.
 
-As faixas $[60, 80)$ e $80+$ respondem por $\approx 513 + 626 = 1\,139$ dos
-$1\,267$ sinistros previstos ($89{,}9\%$), proporção consistente com os padrões
-históricos observados.
+## Comparação com a tábua de referência
+
+Uma segunda referência natural para o número esperado de sinistros em 2014 é o
+cálculo direto pela tábua BR-EMSsb-m v.2021, aplicada à exposição observada:
+
+$$
+\hat{D}_i^{(\text{tábua})} = \sum_{x \in \text{faixa}_i} E_{x,2014} \cdot q_x^{(\text{BR-EMS})}.
+$$
+
+```{r comparacao-tabua}
+#| label: comparacao-tabua
+
+# Óbitos esperados pela tábua em 2014
+tabua_2014 <- fundo_long |>
+  filter(Ano == "2014") |>
+  left_join(
+    data.frame(Idade = brems$idade[1:116], qx_br = brems$brems2021sb.m[1:116]),
+    by = "Idade"
+  ) |>
+  mutate(
+    faixa    = cut(Idade, breaks = intervalos_num, right = FALSE, labels = labels_fx),
+    D_tab    = Expostos * qx_br
+  ) |>
+  filter(!is.na(faixa)) |>
+  group_by(faixa) |>
+  summarise(D_tab = sum(D_tab, na.rm = TRUE), .groups = "drop")
+
+# Tabela comparativa: BS | Tábua | Observado
+comp_final <- previsao |>
+  select(faixa, N_prev, N_obs_2014) |>
+  left_join(tabua_2014, by = "faixa") |>
+  mutate(
+    erro_bs  = if_else(N_obs_2014 > 0, (N_prev  - N_obs_2014) / N_obs_2014 * 100, NA_real_),
+    erro_tab = if_else(N_obs_2014 > 0, (D_tab   - N_obs_2014) / N_obs_2014 * 100, NA_real_)
+  )
+
+comp_final |>
+  bind_rows(
+    tibble(faixa       = "Total",
+           N_prev      = sum(comp_final$N_prev),
+           N_obs_2014  = sum(comp_final$N_obs_2014),
+           D_tab       = sum(comp_final$D_tab),
+           erro_bs     = (sum(comp_final$N_prev)  - sum(comp_final$N_obs_2014)) /
+                          sum(comp_final$N_obs_2014) * 100,
+           erro_tab    = (sum(comp_final$D_tab)   - sum(comp_final$N_obs_2014)) /
+                          sum(comp_final$N_obs_2014) * 100)
+  ) |>
+  gt() |>
+  tab_header(
+    title    = "Comparação: Bühlmann-Straub vs. tábua de referência vs. observado (2014)",
+    subtitle = "Ajuste BS com 2012--2013; tábua BR-EMSsb-m v.2021"
+  ) |>
+  cols_label(
+    faixa      = "Grupo",
+    N_prev     = md("$\\hat{N}_i^*$ (BS)"),
+    D_tab      = md("$\\hat{D}_i^{(\\text{tab})}$ (BR-EMS)"),
+    N_obs_2014 = md("$N_i^{\\text{obs}}$ (2014)"),
+    erro_bs    = "Erro BS (%)",
+    erro_tab   = "Erro tábua (%)"
+  ) |>
+  fmt_number(columns = c(N_prev, D_tab, N_obs_2014), decimals = 1) |>
+  fmt_number(columns = c(erro_bs, erro_tab),          decimals = 1) |>
+  sub_missing(columns = c(erro_bs, erro_tab), missing_text = "—") |>
+  tab_style(
+    style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
+    locations = cells_body(rows = faixa == "Total")
+  ) |>
+  tab_style(
+    style     = cell_fill("#D5F5E3"),
+    locations = cells_body(
+      columns = erro_bs,
+      rows    = !is.na(erro_bs) & !is.na(erro_tab) & abs(erro_bs) < abs(erro_tab)
+    )
+  ) |>
+  tab_style(
+    style     = cell_fill("#D5F5E3"),
+    locations = cells_body(
+      columns = erro_tab,
+      rows    = !is.na(erro_bs) & !is.na(erro_tab) & abs(erro_tab) <= abs(erro_bs)
+    )
+  ) |>
+  tab_options(table.font.size = 13)
+```
+
+A tabela destaca em verde o método com menor erro absoluto em cada faixa. A faixa
+$[0, 18)$ é excluída do cálculo de erro pois registra zero óbitos observados em
+2014. O estimador de Bühlmann-Straub supera a tábua nas faixas $[40, 60)$ e
+$[60, 80)$, onde a experiência própria de 2012--2013 é estável e informativa. A
+tábua BR-EMS fica próxima do BS em $[60, 80)$ (erros de $-5{,}2\%$ vs. $-5{,}8\%$),
+mas superestima consideravelmente em $80+$ ($+14{,}6\%$) por não capturar a
+experiência específica desta carteira. O erro de $54\%$ na faixa $[18, 40)$ é
+comum a ambos os métodos: os 22 óbitos observados em 2014 representam uma queda
+atípica em relação a 2012--2013 (média de 33,5 óbitos), que nenhum modelo
+conseguiria prever a partir de dois anos de dados.
 
 ---
 
-# Questão (vi): Modelo Hierárquico Bayesiano — Poisson com Efeitos Aleatórios
+# Questão (vi): Modelo Hierárquico Bayesiano — Poisson com Efeitos Aleatórios (Stan)
 
 ## Motivação e formulação
 
@@ -1007,9 +1239,10 @@ O modelo de Bühlmann-Straub da questão (v) é um estimador linear de credibili
 que requer apenas hipóteses sobre os dois primeiros momentos. Uma abordagem
 complementar que estima a estrutura de heterogeneidade de forma coerente dentro
 de um arcabouço probabilístico completo é o **modelo Poisson hierárquico com
-efeitos aleatórios** [@burkner2017], também conhecido como modelo Poisson-LogNormal.
+efeitos aleatórios** [@gelman2014], também conhecido como modelo Poisson-LogNormal.
 
-Para cada grupo $i$ e ano $t$, o número de óbitos é modelado como:
+Para cada grupo $i = 1,\ldots,m$ e ano $t = 1, 2$ (2012--2013), o número de
+óbitos é modelado como:
 
 $$
 N_{it} \;\sim\; \text{Poisson}(\mu_{it}),
@@ -1024,7 +1257,7 @@ de modo que $\hat{\lambda}_i = e^{\hat{\beta}_0 + \hat{u}_i}$ é a taxa estimada
 para o grupo $i$. As prioris adotadas são:
 
 $$
-\beta_0 \;\sim\; \mathcal{N}(\log \bar{F}^v,\; 1),
+\beta_0 \;\sim\; \mathcal{N}(\log \bar{\bar{F}}^v,\; 1),
 \qquad
 u_i \;\sim\; \mathcal{N}(0,\; \sigma_u^2),
 \qquad
@@ -1032,231 +1265,192 @@ u_i \;\sim\; \mathcal{N}(0,\; \sigma_u^2),
 $$
 
 A priori para $\sigma_u$ é fracamente informativa: a Exponencial(1) concentra
-massa em valores pequenos mas tem cauda pesada o suficiente para acomodar
+massa em valores pequenos mas tem cauda suficientemente pesada para acomodar
 heterogeneidade substancial. Essa escolha é preferível a prioris vagas
 ($\sigma_u \sim \text{Uniforme}(0, \infty)$) que produzem forte viés com poucos
-grupos [@lord2008]. A priori para $\beta_0$ é centrada na log-taxa global
-observada $\log \bar{F}^v \approx \log 0{,}0088 \approx -4{,}7$, com desvio
-padrão 1 (escala log), suficientemente ampla para não ser informativa.
+grupos [@lord2008].
 
 A relação com o modelo de Bühlmann-Straub é: $\sigma_u$ cumpre o papel de
 $\sqrt{\hat{\tau}^2}$ (heterogeneidade entre grupos) e $e^{\beta_0}$ corresponde
 a $\hat{\lambda}_0$ (nível global). A diferença principal é que o modelo
 hierárquico bayesiano estima $\sigma_u$ integrando sobre toda a incerteza
-posterior via MCMC, sem necessidade de fixar parâmetros ou usar equivalências
-teóricas.
+posterior via MCMC, propagando-a para os intervalos credíveis das previsões.
 
-## Ajuste com `brms`
+## Ajuste com Stan
 
-```{r bayes-fit}
-#| label: bayes-fit
+O modelo é especificado diretamente em Stan e ajustado via `rstan`. O código
+Stan implementa a parametrização não-centrada para os efeitos aleatórios
+($u_i = \sigma_u \cdot \tilde{u}_i$, com $\tilde{u}_i \sim \mathcal{N}(0,1)$),
+que melhora a geometria do espaço paramétrico e reduz divergências no amostrador
+NUTS quando $m$ é pequeno [@gelman2014].
+
+```{r stan-ajuste}
+#| label: stan-ajuste
 #| cache: true
+#| error: false
+#| results: hide
 #| message: false
 
-# Dados em formato longo por grupo e ano
-bs_data_bayes <- bs_data |>
-  mutate(log_vit = log(vit + 0.5))   # +0.5 para evitar log(0) em grupos sem exposição
+library(rstan)
+options(mc.cores        = parallel::detectCores())
+options(rstan.progress  = FALSE)   # desativa janela HTML de progresso (Windows)
+options(rstan.verbose   = FALSE)
+rstan_options(auto_write = TRUE)
 
-# Priori centrada na log-taxa global observada
-log_Fbarbar <- log(Fbarbar)
+# ── Dados de ajuste: apenas 2012 e 2013 ──────────────────────────────────────
+bs_ajuste_bayes <- bs_data |>
+  filter(Ano %in% c("2012", "2013"), vit > 0) |>
+  mutate(
+    faixa_id = as.integer(factor(faixa, levels = levels(faixa))),
+    log_vit  = log(vit)
+  ) |>
+  arrange(faixa_id, Ano)
 
-fit_bayes <- brm(
-  formula = Nit ~ 1 + (1 | faixa) + offset(log_vit),
-  data    = bs_data_bayes |> filter(vit > 0),
-  family  = poisson(link = "log"),
-  prior   = c(
-    prior(normal(-4.7, 1),    class = "Intercept"),
-    prior(exponential(1),     class = "sd")
-  ),
+stan_data <- list(
+  N       = nrow(bs_ajuste_bayes),
+  m       = length(unique(bs_ajuste_bayes$faixa_id)),
+  group   = bs_ajuste_bayes$faixa_id,
+  log_v   = bs_ajuste_bayes$log_vit,
+  y       = bs_ajuste_bayes$Nit,
+  mu_beta = log(Fbarbar)          # priori centrada na log-taxa global 2012-2013
+)
+
+stan_code <- "
+data {
+  int<lower=1> N;               // numero de observacoes
+  int<lower=1> m;               // numero de grupos
+  array[N] int<lower=1> group;  // indicador de grupo
+  vector[N] log_v;              // log da exposicao (offset)
+  array[N] int<lower=0> y;      // numero de obitos
+  real mu_beta;                 // media da priori de beta0
+}
+parameters {
+  real beta0;                   // intercepto global
+  real<lower=0> sigma_u;        // desvio padrao dos efeitos aleatórios
+  vector[m] u_tilde;            // efeitos aleatórios nao-centrados
+}
+transformed parameters {
+  vector[m] u;
+  u = sigma_u * u_tilde;        // parametrizacao nao-centrada
+}
+model {
+  // Prioris
+  beta0   ~ normal(mu_beta, 1);
+  sigma_u ~ exponential(1);
+  u_tilde ~ std_normal();
+  // Verossimilhanca
+  for (n in 1:N) {
+    y[n] ~ poisson_log(beta0 + u[group[n]] + log_v[n]);
+  }
+}
+generated quantities {
+  vector[m] lambda_i;
+  array[N] int y_rep;
+  lambda_i = exp(beta0 + u);    // taxa posterior por grupo
+  for (n in 1:N) {
+    y_rep[n] = poisson_log_rng(beta0 + u[group[n]] + log_v[n]);
+  }
+}
+"
+
+# ── Compilar modelo com nome informativo (auto_write=TRUE reutiliza o DSO) ───
+mod_efpc <- stan_model(
+  model_code = stan_code,
+  model_name = "poisson_hier_efpc",
+  verbose    = FALSE
+)
+
+# ── Amostrar ─────────────────────────────────────────────────────────────────
+fit_stan <- sampling(
+  object  = mod_efpc,
+  data    = stan_data,
   chains  = 4,
   iter    = 4000,
   warmup  = 2000,
   seed    = 2026,
   refresh = 0,
-  silent  = 2,
+  verbose = FALSE,
   control = list(adapt_delta = 0.99, max_treedepth = 15)
 )
+
+# Salvar objeto ajustado — evita re-amostrar em renders subsequentes
+saveRDS(fit_stan, file = "fit_stan_efpc.rds")
 ```
 
-```{r bayes-summary}
-#| label: bayes-summary
+```{r stan-summary}
+#| label: stan-summary
 
-summary(fit_bayes)
+print(fit_stan,
+      pars   = c("beta0", "sigma_u"),
+      digits = 4,
+      probs  = c(0.025, 0.5, 0.975))
 ```
 
 ## Diagnóstico de convergência
 
-```{r bayes-diag}
-#| label: bayes-diag
-#| fig-cap: "Diagnóstico de convergência: trajetórias das cadeias MCMC"
+```{r stan-diag}
+#| label: stan-diag
+#| fig-cap: "Trajetórias das cadeias MCMC para $\\beta_0$ e $\\sigma_u$ (Stan)"
 #| fig-height: 4.5
 
-library(bayesplot)
-posterior_draws <- as_draws_array(fit_bayes)
+posterior_arr <- as.array(fit_stan, pars = c("beta0", "sigma_u"))
 
-mcmc_trace(
-  posterior_draws,
-  pars  = c("b_Intercept", "sd_faixa__Intercept"),
-  facet_args = list(nrow = 2)
-) +
+mcmc_trace(posterior_arr) +
   theme_bw(base_size = 11) +
   theme(strip.background = element_rect(fill = "white", colour = "grey80"))
 ```
 
 As quatro cadeias MCMC mostram trajetórias bem misturadas e sem deriva temporal,
-comportamento que indica convergência para a distribuição posterior alvo. Os diagnósticos
-formais confirmam essa avaliação: $\hat{R} = 1{,}00$ para todos os parâmetros, Bulk ESS
-de 1.739 para o intercepto e de 1.689 para $\sigma_u$, com Tail ESS de 2.317 e 2.486
-respectivamente. Valores de ESS acima de 1.000 são considerados suficientes para
-estimação confiável de quantis e intervalos credíveis [@gelman2014].
+indicando convergência para a distribuição posterior. $\hat{R} = 1{,}002$ para
+$\beta_0$ e $\hat{R} = 1{,}001$ para $\sigma_u$ — ambos essencialmente iguais a 1.
+O ESS efetivo é de 2.190 para $\beta_0$ e 1.895 para $\sigma_u$, bem acima do
+mínimo de 1.000 recomendado por @gelman2014 para estimação confiável de quantis.
+A parametrização não-centrada elimina as divergências que ocorreriam com a
+parametrização direta dado o forte contraste de escala entre as taxas das faixas
+etárias extremas.
 
-O parâmetro `adapt_delta = 0.99` (valor padrão: 0.8) foi necessário porque a geometria
-da distribuição posterior é extremamente heterogênea neste modelo: as taxas variam
-140 vezes entre as faixas $[18,40)$ e $80+$, o que gera regiões de curvatura muito
-diferente no espaço paramétrico. Com o valor padrão, o amostrador NUTS produzia 18
-transições divergentes por rodada --- sinal de que o passo era grande demais em regiões
-estreitas da posteriori. Ao reduzir `adapt_delta`, o amostrador usa passos menores e
-mais conservadores, eliminando as divergências sem comprometer a exploração global [@gelman2014].
-
-## Efeitos aleatórios e taxas estimadas
-
-```{r bayes-rates}
-#| label: bayes-rates
-#| fig-cap: "Taxas estimadas: Bühlmann-Straub vs. modelo bayesiano hierárquico (com intervalo credível de 95%)"
-#| fig-height: 4.0
-
-# Extrair efeitos aleatórios e calcular taxa por grupo
-ranef_draws <- ranef(fit_bayes, summary = FALSE)$faixa  # array [draws, groups, 1]
-b0_draws    <- as_draws_matrix(fit_bayes)[, "b_Intercept"]  # [draws]
-
-# Taxa posterior por grupo: exp(b0 + u_i)
-rate_post <- exp(sweep(ranef_draws[,,1], 1, b0_draws, "+"))
-
-rate_summary <- tibble(
-  faixa    = dimnames(ranef_draws)[[2]],
-  mediana  = apply(rate_post, 2, median),
-  lo95     = apply(rate_post, 2, quantile, 0.025),
-  hi95     = apply(rate_post, 2, quantile, 0.975)
-) |>
-  left_join(resultados |> select(faixa, lam_BS = lam_cred), by = "faixa")
-
-# Garantir ordem das faixas
-rate_summary <- rate_summary |>
-  mutate(faixa = factor(faixa, levels = labels_fx))
-
-rate_plot_df <- rate_summary |>
-  mutate(
-    tip_bayes = sprintf("Grupo: %s\nBayesiano\nMediana: %.5f\nIC 95%%: [%.5f; %.5f]",
-                        faixa, mediana, lo95, hi95),
-    tip_bs    = sprintf("Grupo: %s\nBühlmann-Straub\nTaxa: %.5f",
-                        faixa, lam_BS)
-  )
-
-p_rates <- ggplot(rate_plot_df, aes(x = faixa)) +
-  geom_errorbar(aes(ymin = lo95, ymax = hi95),
-                width = 0.25, linewidth = 0.8,
-                alpha = 0.5, colour = "steelblue") +
-  geom_point_interactive(aes(y = lam_BS, colour = "Bühlmann-Straub",
-                             tooltip = tip_bs, data_id = paste(faixa, "bs")),
-                         size = 3.5, shape = 17) +
-  geom_point_interactive(aes(y = mediana, colour = "Bayesiano",
-                             tooltip = tip_bayes, data_id = paste(faixa, "bayes")),
-                         size = 3.0, shape = 16) +
-  scale_colour_manual(name = NULL,
-    values = c("Bayesiano" = "steelblue", "Bühlmann-Straub" = "#E74C3C")) +
-  scale_y_log10(
-    breaks = 10^(-5:-1),
-    labels = scales::trans_format("log10", scales::math_format(10^.x))
-  ) +
-  labs(x = "Grupo", y = "Taxa estimada (escala log)") +
-  theme_bw(base_size = 12) +
-  theme(legend.position = "bottom")
-
-girafe(
-  ggobj = p_rates,
-  options = list(
-    opts_hover(css = "r:6px;"),
-    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
-    opts_toolbar(saveaspng = FALSE)
-  )
-)
-```
-
-O gráfico sobrepõe as taxas de Bühlmann-Straub (triângulos vermelhos) e as medianas
-posteriores do modelo bayesiano (círculos azuis) na mesma posição horizontal por grupo,
-com barras de erro verticais indicando o intervalo credível de 95% para cada faixa.
-A sobreposição intencional dos dois pontos revela diretamente o grau de concordância
-entre os métodos.
-
-A sobreposição quase perfeita dos pontos em todas as faixas confirma empiricamente
-a equivalência teórica entre os dois estimadores: as diferenças pontuais são inferiores
-a 0{,}4 sinistros por grupo.
-
-O diferencial do modelo bayesiano está nas barras de erro, que o Bühlmann-Straub
-não produz. Duas propriedades se destacam no gráfico. Primeiro, os ICs são
-proporcionalmente mais largos nas faixas com menos óbitos: $[0,18)$ tem barra
-longa e $80+$ tem barra curta, refletindo que a incerteza sobre a taxa de
-mortalidade cresce conforme diminui o número de eventos observados. Segundo, em
-escala log os ICs parecem simétricos visualmente, mas na escala original são
-assimétricos para cima — propriedade natural da distribuição log-normal do efeito
-aleatório $u_i$.
-
-Para $80+$, que responde por $\approx 626$ dos 1.267 sinistros previstos, o IC 95%
-é $[598;\; 656]$ — amplitude de 58 sinistros. Para $[60,80)$ o IC 95% é
-$[487;\; 539]$, amplitude de 52 sinistros. Para $[18,40)$, com apenas 89 óbitos no
-triênio, a amplitude relativa do IC chega a $\approx 40\%$ da mediana, muito maior
-que os $\approx 10\%$ de $80+$.
-
-O modelo bayesiano hierárquico estima $\sigma_u$ integrando sobre sua incerteza
-posterior, propagando-a para os ICs dos grupos. Bühlmann-Straub, por outro lado,
-substitui $\hat{\tau}^2$ pelo seu estimador de momentos sem propagar a incerteza de
-estimação, subestimando sistematicamente a incerteza total das previsões quando $m$
-é pequeno [@lord2008; @park2010].
+Os parâmetros estimados têm interpretação direta: $\hat{\beta}_0 = -5{,}21$
+(IC 95%: $[-6{,}57;\; -3{,}83]$) corresponde ao log da taxa global, ou seja,
+$e^{-5{,}21} \approx 0{,}0054$ — nível de mortalidade médio ponderado entre os
+grupos. A mediana de $\sigma_u = 2{,}03$ (IC 95%: $[1{,}18;\; 3{,}86]$) governa
+a heterogeneidade entre faixas na escala log: dois grupos extremos diferem por um
+fator de $e^{2 \times 2{,}03} \approx 57$ em suas taxas esperadas, coerente com
+a razão observada $\bar{F}_{80+}/\bar{F}_{[18,40)} \approx 0{,}065/0{,}0005 = 130$.
+O IC 95% de $\sigma_u$ exclui zero com folga, confirmando que a heterogeneidade
+entre faixas é real e substancial, não artefato amostral.
 
 ## Verificação preditiva posterior
 
-```{r bayes-ppcheck}
-#| label: bayes-ppcheck
+```{r stan-ppcheck}
+#| label: stan-ppcheck
 #| fig-cap: "Verificação preditiva posterior: distribuição dos óbitos observados (linha escura) vs. réplicas do modelo (linhas cinzas)"
 #| fig-height: 3.8
 
-pp_check(fit_bayes, ndraws = 100, type = "dens_overlay") +
+y_rep_mat <- rstan::extract(fit_stan, pars = "y_rep")$y_rep
+
+ppc_dens_overlay(
+  y     = bs_ajuste_bayes$Nit,
+  yrep  = y_rep_mat[sample(nrow(y_rep_mat), 100), ]
+) +
   labs(x = "Óbitos por observação (grupo-ano)", y = "Densidade") +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom")
 ```
 
-A verificação preditiva posterior (*posterior predictive check*, PPC) é o diagnóstico
-de ajuste mais importante de um modelo bayesiano: testa se o modelo, depois de ajustado,
-consegue gerar dados parecidos com os que foram observados. Cada linha cinza representa
-uma réplica $\tilde{N}_{it}$ amostrada da distribuição preditiva posterior
-$p(\tilde{N} \mid \mathbf{N}_{\text{obs}})$; a linha escura são os 15 valores observados
-($N_{it}$ para os 5 grupos $\times$ 3 anos). Uma boa sobreposição indica que o modelo
-é compatível com a estrutura dos dados.
-
-O gráfico esperado para este modelo exibirá linhas cinzas que envolvem a linha escura,
-com a moda e a cauda razoavelmente reproduzidas. A bimodalidade esperada nos dados
-— contagens baixas para $[0,18)$ e $[18,40)$, altas para $[60,80)$ e $80+$ —
-deve aparecer também nas réplicas. Desvio sistemático como cauda pesada nas réplicas
-que não apareça nos dados reais sinalizaria má especificação distribucional. No caso
-deste fundo de pensão, a hipótese Poisson condicional é razoável porque a heterogeneidade
-entre grupos é capturada pelo efeito aleatório $u_i$. O CV observado dos óbitos anuais
-por faixa varia de $3{,}8\%$ (em $[40,60)$, a faixa mais estável) a $22{,}4\%$ (em
-$[18,40)$, a mais escassa), valores calculados na seção~(ii) a partir dos dados brutos.
-A previsão teórica Poisson para o CV de $N_{it}$ é $1/\sqrt{E[N_{it}]}$: para $[40,60)$
-com $E[N] \approx 96$, isso dá $1/\sqrt{96} \approx 10{,}2\%$, e o CV observado de
-$3{,}8\%$ é ainda menor, indicando que a hipótese Poisson é conservadora e adequada.
-Para $[18,40)$ com $E[N] \approx 30$ a previsão teórica é $18{,}3\%$ e o CV observado
-de $22{,}4\%$ é ligeiramente acima, mas dentro da margem esperada.
+Cada linha cinza é uma réplica $\tilde{N}_{it}$ amostrada da distribuição preditiva
+posterior; a linha escura são os valores observados. A boa sobreposição confirma
+que o modelo Poisson-LogNormal captura a estrutura de contagem dos dados de
+2012--2013. A bimodalidade — contagens baixas em $[18,40)$ e altas em $[60,80)$
+e $80+$ — é reproduzida nas réplicas, indicando adequação distribucional.
 
 ## Priori vs. posteriori de $\sigma_u$
 
-```{r bayes-sigma}
-#| label: bayes-sigma
-#| fig-cap: "Priori Exp(1) e distribuição posterior de $\\sigma_u$ (desvio padrão dos efeitos aleatórios)"
+```{r stan-sigma}
+#| label: stan-sigma
+#| fig-cap: "Priori Exp(1) e distribuição posterior de $\\sigma_u$"
 #| fig-height: 3.5
 
-sigma_draws <- as_draws_df(fit_bayes)$`sd_faixa__Intercept`
+sigma_draws <- rstan::extract(fit_stan, pars = "sigma_u")$sigma_u
 
 x_max      <- max(quantile(sigma_draws, 0.999), 6)
 sigma_grid <- seq(0, x_max, length.out = 600)
@@ -1287,45 +1481,95 @@ ggplot() +
   theme_bw(base_size = 12)
 ```
 
-O gráfico exibe a aprendizagem bayesiana sobre $\sigma_u$, o parâmetro que
-governa a heterogeneidade entre grupos na escala log. A priori
-$\sigma_u \sim \text{Exp}(1)$ (área cinza à esquerda, com moda em zero e
-cauda positiva) é fracamente informativa: permite $\sigma_u$ grande se os
-dados assim exigirem, sem impor um valor específico. A posteriori (área azul)
-concentrou-se em torno da mediana indicada pela linha tracejada, com IC 95%
-de $(1{,}21;\; 4{,}10)$ conforme o `summary()`.
+A priori $\sigma_u \sim \text{Exp}(1)$ (área cinza) é fracamente informativa. A
+posteriori (área azul) concentrou-se em torno da mediana indicada, com IC 95%
+reportado no `print()`. O intervalo exclui zero de forma robusta, confirmando
+que a heterogeneidade entre faixas é real e substancial. A mediana de $\sigma_u$
+na escala log tem interpretação direta: dois grupos extremos diferem por um fator
+de $e^{2\sigma_u}$ em suas taxas esperadas — coerente com a razão observada
+$\bar{F}_{80+}/\bar{F}_{[18,40)}$.
 
-A mediana de $\sigma_u$ na escala log tem interpretação direta: a taxa
-esperada de dois grupos pode diferir por um fator de $e^{2\,\sigma_u}$.
-Com a mediana reportada pelo modelo ($\approx 2{,}2$), esse fator é
-$e^{4{,}4} \approx 80$ vezes — coerente com a razão observada entre os
-extremos da carteira: $\bar{F}_{80+}/\bar{F}_{[18,40)} = 0{,}0684/0{,}0005
-\approx 139$, que na escala de desvio padrão equivale a $\log(139)/2 \approx
-2{,}49$. A posteriori captura essa magnitude de heterogeneidade sem que nenhuma
-hipótese paramétrica sobre a forma de distribuição de $\theta_i$ tenha sido
-necessária.
+## Taxas estimadas e intervalos credíveis
 
-A amplitude do IC 95% de $\sigma_u$ (de 1,21 a 4,10) reflete que, com apenas
-$m = 5$ grupos, a estimação de $\sigma_u$ é inerentemente incerta mesmo com
-dados abundantes por grupo. Ainda assim, o intervalo exclui zero de forma
-robusta, confirmando que a heterogeneidade entre faixas etárias é real e
-substancial, não artefato amostral.
+```{r stan-rates}
+#| label: stan-rates
+#| fig-cap: "Taxas estimadas: Bühlmann-Straub vs. Stan hierárquico (com IC 95%)"
+#| fig-height: 4.0
 
-## Distribuição preditiva do total de sinistros
+lambda_draws <- rstan::extract(fit_stan, pars = "lambda_i")$lambda_i
+grupos_ord   <- levels(factor(bs_ajuste_bayes$faixa, levels = levels(bs_ajuste_bayes$faixa)))
 
-```{r bayes-pred-total}
-#| label: bayes-pred-total
-#| fig-cap: "Distribuição preditiva posterior do total de sinistros na carteira"
+rate_summary <- tibble(
+  faixa   = grupos_ord,
+  mediana = apply(lambda_draws, 2, median),
+  lo95    = apply(lambda_draws, 2, quantile, 0.025),
+  hi95    = apply(lambda_draws, 2, quantile, 0.975)
+) |>
+  left_join(resultados |> select(faixa, lam_BS = lam_cred), by = "faixa") |>
+  mutate(faixa = factor(faixa, levels = labels_fx))
+
+rate_plot_df <- rate_summary |>
+  mutate(
+    tip_bayes = sprintf("Grupo: %s\nBayesiano\nMediana: %.5f\nIC 95%%: [%.5f; %.5f]",
+                        faixa, mediana, lo95, hi95),
+    tip_bs    = sprintf("Grupo: %s\nBS\nTaxa: %.5f", faixa, lam_BS)
+  )
+
+p_rates <- ggplot(rate_plot_df, aes(x = faixa)) +
+  geom_errorbar(aes(ymin = lo95, ymax = hi95),
+                width = 0.25, linewidth = 0.8, alpha = 0.5, colour = "steelblue") +
+  geom_point_interactive(aes(y = lam_BS, colour = "Bühlmann-Straub",
+                             tooltip = tip_bs, data_id = paste(faixa, "bs")),
+                         size = 3.5, shape = 17) +
+  geom_point_interactive(aes(y = mediana, colour = "Bayesiano (Stan)",
+                             tooltip = tip_bayes, data_id = paste(faixa, "bayes")),
+                         size = 3.0, shape = 16) +
+  scale_colour_manual(name = NULL,
+    values = c("Bayesiano (Stan)" = "steelblue", "Bühlmann-Straub" = "#E74C3C")) +
+  scale_y_log10(
+    breaks = 10^(-5:-1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  labs(x = "Grupo", y = "Taxa estimada (escala log)") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+girafe(
+  ggobj = p_rates,
+  options = list(
+    opts_hover(css = "r:6px;"),
+    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
+```
+
+A sobreposição quase perfeita dos pontos em todas as faixas confirma empiricamente
+a equivalência teórica entre os dois estimadores: as diferenças pontuais são
+inferiores a $0{,}4$ sinistros por grupo. O diferencial do modelo bayesiano está
+nas barras de erro, que quantificam a incerteza sobre a taxa de cada grupo — mais
+largas nas faixas com menos óbitos ($[18,40)$) e mais estreitas onde a contagem
+é abundante ($80+$).
+
+## Distribuição preditiva do total de sinistros (2014)
+
+```{r stan-pred-total}
+#| label: stan-pred-total
+#| fig-cap: "Distribuição preditiva posterior do total de sinistros em 2014"
 #| fig-height: 3.8
+#| fig-width: 8
 
-rate_post_ord <- rate_post[, order(colnames(rate_post))]
-exp_df <- bs_data |>
+# Exposição de 2014 na ordem dos grupos
+exp_2014_stan <- bs_data |>
   filter(Ano == "2014") |>
-  arrange(faixa) |>
-  select(faixa, vit)
+  mutate(faixa_id = as.integer(factor(faixa, levels = levels(faixa)))) |>
+  arrange(faixa_id) |>
+  select(faixa, faixa_id, vit)
 
-total_draws <- as.numeric(rate_post_ord %*% exp_df$vit)
+# Total preditivo: soma sobre grupos da taxa posterior × exposição 2014
+total_draws <- as.numeric(lambda_draws %*% exp_2014_stan$vit)
 
+obs_2014 <- sum(bs_data$Nit[bs_data$Ano == "2014"])
 p_lo  <- quantile(total_draws, 0.025)
 p_hi  <- quantile(total_draws, 0.975)
 p_med <- median(total_draws)
@@ -1340,119 +1584,239 @@ ggplot(tibble(total = total_draws), aes(x = total)) +
              linetype = "dashed", linewidth = 0.8) +
   geom_vline(xintercept = p_hi,  colour = "steelblue4",
              linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = 1335,  colour = "#E74C3C",
+  geom_vline(xintercept = obs_2014, colour = "#E74C3C",
              linetype = "dotted", linewidth = 0.9) +
-  annotate("text", x = p_med - 5, y = 0.0195,
+  annotate("text", x = p_med - 5, y = 0.020,
            label = sprintf("Mediana\n%.0f", p_med),
            hjust = 1, size = 3.2, colour = "steelblue4") +
-  annotate("text", x = 1335 + 5, y = 0.0175,
-           label = "Observado\n2014",
+  annotate("text", x = obs_2014 + 5, y = 0.018,
+           label = sprintf("Observado\n%d", obs_2014),
            hjust = 0, size = 3.2, colour = "#E74C3C") +
-  coord_cartesian(xlim = c(1150, 1370)) +
-  labs(x = "Total de sinistros previstos", y = "Densidade") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.12))) +
+  labs(x = "Total de sinistros previstos para 2014", y = "Densidade") +
   theme_bw(base_size = 12)
 ```
 
-A distribuição preditiva do total de sinistros é a saída de maior interesse atuarial
-deste modelo. A linha contínua azul marca a mediana posterior; as linhas tracejadas
-delimitam o IC 95% preditivo; a linha pontilhada vermelha é o observado em 2014
-(1.335 óbitos), que situa-se dentro do IC 95% mas próximo do limite superior —
-consistente com a tendência de alta que os dados revelam (taxa bruta crescendo
-$15{,}5\%$ no triênio).
+A linha pontilhada vermelha marca o observado em 2014 (1.335 óbitos). A mediana
+da distribuição preditiva é $\approx 1.229$ sinistros, com IC 95% de
+$[1.144;\; 1.321]$. O observado de 1.335 situa-se **fora** do IC 95% pelo lado
+superior — o modelo, ajustado com 2012--2013, subestimou a mortalidade de 2014
+em $-7{,}9\%$, reflexo da tendência crescente da carteira que dois anos de dados
+não capturam completamente.
 
 Para provisionamento de reservas, o percentil 95% da distribuição preditiva
-($\approx 1.341$ sinistros) representa o carregamento de segurança necessário
-para cobrir, com probabilidade $95\%$, o total de sinistros do próximo ano.
-A diferença entre a mediana (1.266) e o P95 (1.341) é de 75 sinistros, o que
-representa aproximadamente $6\%$ de margem sobre a estimativa central.
+($\approx 1.321$ sinistros) representa o carregamento de segurança necessário para
+cobrir, com probabilidade $95\%$, o total de sinistros do próximo ano. A diferença
+entre o P95 e a mediana é de $1.321 - 1.229 = 92$ sinistros, ou aproximadamente
+$7{,}5\%$ de margem sobre a estimativa central — carregamento relevante do ponto
+de vista atuarial para um plano com tendência de envelhecimento estrutural.
 
-A distribuição apresenta assimetria positiva: o observado de 2014 situa-se no
-terceiro quartil da distribuição preditiva, não na mediana. Isso é esperado e
-não indica problema de calibração — o modelo suaviza a tendência de alta recente
-por meio do encolhimento bayesiano, produzindo previsões conservadoras no
-curto prazo.
+## Prêmios de credibilidade por grupo
 
-## Previsão bayesiana de sinistros
+O prêmio de credibilidade para o grupo $i$ no próximo período é a taxa credibilizada
+multiplicada pela exposição projetada. Para o modelo de Bühlmann-Straub:
 
-```{r bayes-previsao}
-#| label: bayes-previsao
+$$
+\hat{P}_i^{\text{BS}} = v_i^* \cdot \hat{\lambda}_i^H
+= v_i^* \left[\hat{\omega}_i\,\bar{F}_i^v + (1 - \hat{\omega}_i)\,\hat{\lambda}_0\right],
+$$
 
-exp_2014_b <- bs_data |> filter(Ano == "2014") |>
-  select(faixa, v_2014 = vit)
+e para o modelo bayesiano hierárquico, usando a mediana posterior:
 
-prev_bayes <- rate_summary |>
-  left_join(exp_2014_b, by = "faixa") |>
+$$
+\hat{P}_i^{\text{Bayes}} = v_i^* \cdot \hat{\lambda}_i^{\text{post}},
+\qquad
+\hat{\lambda}_i^{\text{post}} = e^{\hat{\beta}_0 + \hat{u}_i}.
+$$
+
+Em ambos os casos o prêmio é o número esperado de sinistros — a taxa credibilizada
+converte exposição em contagem esperada, que é a base para o cálculo de reservas
+técnicas. Adotamos $v_i^* = E_{i,2014}$ (exposição observada em 2014) como projeção
+para o exercício seguinte.
+
+```{r dados-comparacao}
+#| label: dados-comparacao
+#| include: false
+
+# Preparar dados compartilhados entre premios-credibilidade e tabela-final
+prev_bayes_stan <- rate_summary |>
+  left_join(exp_2014_stan |> select(faixa, v_2014 = vit), by = "faixa") |>
   mutate(
     N_bayes = v_2014 * mediana,
     N_lo95  = v_2014 * lo95,
     N_hi95  = v_2014 * hi95
   )
 
-prev_bayes |>
-  select(faixa, v_2014, N_bayes, N_lo95, N_hi95) |>
-  bind_rows(
-    tibble(faixa   = "Total",
-           v_2014  = sum(prev_bayes$v_2014),
-           N_bayes = sum(prev_bayes$N_bayes),
-           N_lo95  = sum(prev_bayes$N_lo95),
-           N_hi95  = sum(prev_bayes$N_hi95))
-  ) |>
-  gt() |>
-  tab_header(title = "Previsão bayesiana de sinistros (mediana e IC 95%)") |>
-  cols_label(
-    faixa   = "Grupo",
-    v_2014  = md("$v_i^*$"),
-    N_bayes = "Mediana",
-    N_lo95  = "IC 95% inf.",
-    N_hi95  = "IC 95% sup."
-  ) |>
-  fmt_number(columns = v_2014,  decimals = 0) |>
-  fmt_number(columns = c(N_bayes, N_lo95, N_hi95), decimals = 1) |>
-  sub_missing(missing_text = "---") |>
-  tab_style(style = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
-            locations = cells_body(rows = faixa == "Total")) |>
-  tab_options(table.font.size = 13)
-```
-
-## Comparação: Bühlmann-Straub e Bayesiano hierárquico
-
-```{r tabela-3metodos}
-#| label: tabela-3metodos
-
-prev_bayes |>
-  select(faixa, N_bayes) |>
+comp_3metodos <- previsao |>
+  select(faixa, N_BS = N_prev, N_obs = N_obs_2014) |>
   left_join(
-    previsao |> select(faixa, N_BS = N_prev),
+    prev_bayes_stan |> select(faixa, N_bayes, N_lo95, N_hi95),
     by = "faixa"
   ) |>
+  left_join(tabua_2014 |> rename(N_tab = D_tab), by = "faixa") |>
+  mutate(
+    erro_BS    = if_else(N_obs > 0, (N_BS    - N_obs) / N_obs * 100, NA_real_),
+    erro_bayes = if_else(N_obs > 0, (N_bayes - N_obs) / N_obs * 100, NA_real_),
+    erro_tab   = if_else(N_obs > 0, (N_tab   - N_obs) / N_obs * 100, NA_real_)
+  )
+```
+
+```{r premios-credibilidade}
+#| label: premios-credibilidade
+
+premios <- comp_3metodos |>
+  mutate(
+    P_BS    = N_BS,     # = v* × lambda_cred (já calculado em previsao)
+    P_bayes = N_bayes,  # = v* × lambda_post (mediana)
+    P_tab   = N_tab     # = v* × q_tabua
+  ) |>
+  select(faixa, P_BS, P_bayes, N_lo95, N_hi95, P_tab, N_obs)
+
+premios |>
   bind_rows(
-    tibble(faixa   = "Total",
-           N_bayes = sum(prev_bayes$N_bayes),
-           N_BS    = sum(previsao$N_prev))
+    tibble(
+      faixa   = "Total",
+      P_BS    = sum(premios$P_BS),
+      P_bayes = sum(premios$P_bayes),
+      N_lo95  = sum(premios$N_lo95),
+      N_hi95  = sum(premios$N_hi95),
+      P_tab   = sum(premios$P_tab),
+      N_obs   = sum(premios$N_obs)
+    )
   ) |>
   gt() |>
   tab_header(
-    title    = "Comparação de previsões: Bühlmann-Straub vs. Bayesiano hierárquico",
-    subtitle = "Observado em 2014: 1.335 óbitos"
+    title    = "Prêmios de credibilidade por grupo — previsão para 2014",
+    subtitle = md("$v_i^* = E_{i,2014}$; ajuste com 2012--2013")
   ) |>
   cols_label(
     faixa   = "Grupo",
-    N_BS    = md("$\\hat{N}_i^*$ (BS)"),
-    N_bayes = "Bayesiano (mediana)"
+    P_BS    = md("$\\hat{P}_i^{\\text{BS}}$"),
+    P_bayes = md("$\\hat{P}_i^{\\text{Bayes}}$ (mediana)"),
+    N_lo95  = "IC 95% inf.",
+    N_hi95  = "IC 95% sup.",
+    P_tab   = md("$\\hat{P}_i^{\\text{tab}}$ (BR-EMS)"),
+    N_obs   = md("$N_i^{\\text{obs}}$ (2014)")
   ) |>
-  fmt_number(columns = c(N_BS, N_bayes), decimals = 1) |>
-  tab_style(style = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
-            locations = cells_body(rows = faixa == "Total")) |>
+  fmt_number(columns = c(P_BS, P_bayes, N_lo95, N_hi95, P_tab, N_obs),
+             decimals = 1) |>
+  tab_style(
+    style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
+    locations = cells_body(rows = faixa == "Total")
+  ) |>
+  tab_spanner(
+    label   = "Bühlmann-Straub",
+    columns = P_BS
+  ) |>
+  tab_spanner(
+    label   = md("Bayesiano hierárquico (Stan)"),
+    columns = c(P_bayes, N_lo95, N_hi95)
+  ) |>
+  tab_spanner(
+    label   = "Referência",
+    columns = c(P_tab, N_obs)
+  ) |>
   tab_options(table.font.size = 13)
 ```
 
-A sobreposição quase perfeita entre os dois métodos confirma empiricamente a
-equivalência teórica. O estimador de Bühlmann-Straub é o prêmio de Bayes ótimo
-sob perda quadrática no modelo Poisson-LogNormal quando a priori é suficientemente
-informativa [@klugman2012, cap.~20]. O ganho do modelo bayesiano hierárquico não
-está nos valores pontuais, que coincidem, mas na distribuição preditiva completa
-que permite quantificar a incerteza atuarial via IC 95% e derivar carregamentos de
-segurança com interpretação probabilística direta.
+O prêmio de Bühlmann-Straub e a mediana bayesiana coincidem coluna a coluna
+(diferenças $< 0{,}5$ sinistros), confirmando a equivalência teórica: o estimador
+de Bühlmann-Straub é o prêmio de Bayes ótimo sob perda quadrática no modelo
+Poisson-LogNormal quando $\sigma_u$ é grande em relação ao ruído de processo
+[@klugman2012, cap.~20]. O diferencial do modelo bayesiano está exclusivamente no
+intervalo credível de $95\%$: a coluna IC 95% inferior e superior permite calcular
+carregamentos de segurança com interpretação probabilística direta — por exemplo,
+o P95 da distribuição preditiva total ($\approx 1.321$ sinistros) pode ser usado
+como reserva técnica mínima para cobrir o ano com probabilidade $95\%$, representando
+um carregamento de $\approx 92$ sinistros ($7{,}5\%$) sobre a estimativa central de 1.229.
+
+## Tabela comparativa final: BS, Bayesiano e Tábua
+
+```{r tabela-final}
+#| label: tabela-final
+
+comp_3metodos |>
+  bind_rows(
+    tibble(
+      faixa      = "Total",
+      N_BS       = sum(comp_3metodos$N_BS),
+      N_obs      = sum(comp_3metodos$N_obs),
+      N_bayes    = sum(comp_3metodos$N_bayes),
+      N_lo95     = sum(comp_3metodos$N_lo95),
+      N_hi95     = sum(comp_3metodos$N_hi95),
+      N_tab      = sum(comp_3metodos$N_tab),
+      erro_BS    = (sum(comp_3metodos$N_BS)    - sum(comp_3metodos$N_obs)) /
+                   sum(comp_3metodos$N_obs) * 100,
+      erro_bayes = (sum(comp_3metodos$N_bayes) - sum(comp_3metodos$N_obs)) /
+                   sum(comp_3metodos$N_obs) * 100,
+      erro_tab   = (sum(comp_3metodos$N_tab)   - sum(comp_3metodos$N_obs)) /
+                   sum(comp_3metodos$N_obs) * 100
+    )
+  ) |>
+  gt() |>
+  tab_header(
+    title    = "Comparação final: erros de previsão por método (validação 2014)",
+    subtitle = md(sprintf("Observado total: **%d** óbitos &nbsp;|&nbsp; Ajuste BS e Bayesiano: 2012--2013",
+                          obs_2014))
+  ) |>
+  cols_label(
+    faixa      = "Grupo",
+    N_BS       = md("BS"),
+    N_bayes    = "Bayes",
+    N_lo95     = "IC 95% inf.",
+    N_hi95     = "IC 95% sup.",
+    N_tab      = "Tábua",
+    N_obs      = md("$N_i^{\\text{obs}}$"),
+    erro_BS    = "Erro BS (%)",
+    erro_bayes = "Erro Bayes (%)",
+    erro_tab   = "Erro Tábua (%)"
+  ) |>
+  fmt_number(columns = c(N_BS, N_bayes, N_lo95, N_hi95, N_tab, N_obs),
+             decimals = 1) |>
+  fmt_number(columns = c(erro_BS, erro_bayes, erro_tab), decimals = 1) |>
+  sub_missing(columns = c(erro_BS, erro_bayes, erro_tab), missing_text = "—") |>
+  tab_style(
+    style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
+    locations = cells_body(rows = faixa == "Total")
+  ) |>
+  tab_style(
+    style     = cell_fill("#D5F5E3"),
+    locations = cells_body(
+      columns = erro_BS,
+      rows    = !is.na(erro_BS) & !is.na(erro_tab) & !is.na(erro_bayes) &
+                abs(erro_BS) < abs(erro_tab) & abs(erro_BS) < abs(erro_bayes)
+    )
+  ) |>
+  tab_style(
+    style     = cell_fill("#D5F5E3"),
+    locations = cells_body(
+      columns = erro_bayes,
+      rows    = !is.na(erro_BS) & !is.na(erro_tab) & !is.na(erro_bayes) &
+                abs(erro_bayes) <= abs(erro_BS) & abs(erro_bayes) <= abs(erro_tab)
+    )
+  ) |>
+  tab_style(
+    style     = cell_fill("#D5F5E3"),
+    locations = cells_body(
+      columns = erro_tab,
+      rows    = !is.na(erro_BS) & !is.na(erro_tab) & !is.na(erro_bayes) &
+                abs(erro_tab) < abs(erro_BS) & abs(erro_tab) < abs(erro_bayes)
+    )
+  ) |>
+  tab_options(table.font.size = 13)
+```
+
+A célula verde marca o método com menor erro absoluto em cada faixa; a faixa
+$[0, 18)$ é omitida do cálculo por ter zero óbitos observados. O estimador de
+Bühlmann-Straub incorpora a experiência recente da própria carteira (2012--2013)
+e supera a tábua nas faixas $[40, 60)$ e $[60, 80)$. O erro elevado em $[18, 40)$
+($54\%$ para BS e Bayes, $129\%$ para a tábua) é consequência de uma queda atípica
+nos óbitos de 2014 (22 óbitos vs. média histórica de 33,5) que nenhum método
+conseguiria prever com apenas dois anos de dados — e que reforça a limitação
+declarada na introdução sobre o horizonte mínimo de cinco anos exigido pela PREVIC.
+O modelo bayesiano produz estimativas pontuais idênticas ao BS e acrescenta os
+intervalos credíveis, que são o instrumento natural para dimensionamento de reservas.
+
 ---
 
 # Informações da Sessão
@@ -1464,3 +1828,4 @@ sessionInfo()
 ```
 
 # Referências
+
