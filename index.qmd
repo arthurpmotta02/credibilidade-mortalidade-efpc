@@ -65,8 +65,8 @@ Superintendência Nacional de Previdência Complementar (PREVIC).
 O objetivo desta parte é obter o **número esperado de sinistros por classe de risco
 para o próximo ano** com base no modelo de Bühlmann-Straub para a frequência de
 sinistros, seguindo o desenvolvimento de @buhlmann2005. O caminho percorrido é:
-(i)~análise exploratória; (ii)~perfis etários e faixas de risco; (iii)~seleção e
-avaliação formal de tábuas de referência; (iv)~definição dos grupos; (v)~implementação
+(i) análise exploratória; (ii) perfis etários e faixas de risco; (iii) seleção e
+avaliação formal de tábuas de referência; (iv) definição dos grupos; (v) implementação
 do modelo e previsão.
 
 ## Leitura dos dados
@@ -101,29 +101,44 @@ sum_d2 <- fundo_long |>
   group_by(Idade) |>
   summarise(tot_obt = sum(Obitos), tot_exp = sum(Expostos), .groups = "drop")
 
-fundo_long |>
+# ── Métricas para uso em texto inline ────────────────────────────────────────
+resumo_anual <- fundo_long |>
   group_by(Ano) |>
   summarise(
-    Expostos             = sum(Expostos),
-    Obitos               = sum(Obitos),
-    `Taxa bruta (‰)`     = round(1000 * sum(Obitos) / sum(Expostos), 3),
+    Expostos         = sum(Expostos),
+    Obitos           = sum(Obitos),
+    taxa_bruta_mil   = round(1000 * sum(Obitos) / sum(Expostos), 1),
     .groups = "drop"
-  ) |>
+  )
+
+tot_exp_tri  <- sum(sum_d2$tot_exp)
+tot_obt_tri  <- sum(sum_d2$tot_obt)
+n_idades     <- nrow(sum_d2)
+taxa_2012    <- resumo_anual$taxa_bruta_mil[resumo_anual$Ano == "2012"]
+taxa_2014    <- resumo_anual$taxa_bruta_mil[resumo_anual$Ano == "2014"]
+cresc_taxa   <- round((taxa_2014 - taxa_2012) / taxa_2012 * 100, 1)
+exp_2012     <- resumo_anual$Expostos[resumo_anual$Ano == "2012"]
+exp_2014     <- resumo_anual$Expostos[resumo_anual$Ano == "2014"]
+cresc_exp    <- round((exp_2014 - exp_2012) / exp_2012 * 100, 1)
+
+resumo_anual |>
+  select(Ano, Expostos, Obitos, `Taxa bruta (‰)` = taxa_bruta_mil) |>
   gt() |>
   tab_header(title = "Resumo anual da carteira") |>
   fmt_number(columns = c(Expostos, Obitos), decimals = 0) |>
   tab_options(table.font.size = 13)
 ```
 
-A base cobre 116 idades (0 a 115) ao longo de $T = 3$ anos, totalizando
-417.964 pessoas-ano de exposição e 3.658 óbitos. A taxa bruta passou de
-$8{,}2$‰ em 2012 para $9{,}5$‰ em 2014, crescimento de $15{,}5\%$
-com exposição praticamente estável ($+2{,}5\%$), revelando envelhecimento
-progressivo da carteira. Vale registrar que a Portaria PREVIC nº 835/2020
-[@previc835] exige, para adequação da tábua de mortalidade geral, no mínimo
-**cinco exercícios** — horizonte não atingido com esses dados, limitação que
-deve ser declarada explicitamente e que reforça a escolha do modelo de
-credibilidade como alternativa robusta para períodos curtos.
+A base cobre `r n_idades` idades (0 a `r n_idades - 1`) ao longo de $T = 3$ anos,
+totalizando `r format(tot_exp_tri, big.mark = ".", decimal.mark = ",")` pessoas-ano
+de exposição e `r format(tot_obt_tri, big.mark = ".", decimal.mark = ",")` óbitos.
+A taxa bruta passou de `r taxa_2012`‰ em 2012 para `r taxa_2014`‰ em 2014,
+crescimento de `r cresc_taxa`% com exposição praticamente estável
+(+`r cresc_exp`%), revelando envelhecimento progressivo da carteira. Vale registrar
+que a Portaria PREVIC nº 835/2020 [@previc835] exige, para adequação da tábua de
+mortalidade geral, no mínimo **cinco exercícios** — horizonte não atingido com
+esses dados, limitação que deve ser declarada explicitamente e que reforça a
+escolha do modelo de credibilidade como alternativa robusta para períodos curtos.
 
 ---
 
@@ -145,6 +160,12 @@ pct_exp_60p <- sum(sum_d2$tot_exp[sum_d2$Idade >= 60]) / sum(sum_d2$tot_exp)
 dep_idx <- sum(sum_d2$tot_exp[sum_d2$Idade >= 60]) /
            sum(sum_d2$tot_exp[sum_d2$Idade >= 18 & sum_d2$Idade < 60])
 
+# Variáveis para uso inline
+idade_media_r  <- round(idade_media, 1)
+dep_idx_r      <- round(dep_idx, 3)
+pct_obt_60p_r  <- round(pct_obt_60p * 100, 1)
+pct_exp_60p_r  <- round(pct_exp_60p * 100, 1)
+
 tibble(
   Métrica = c(
     "Exposição total (pessoas-ano)",
@@ -158,11 +179,11 @@ tibble(
   Valor = c(
     sum(sum_d2$tot_exp),
     sum(sum_d2$tot_obt),
-    round(idade_media, 1),
+    idade_media_r,
     round(1000 * sum(sum_d2$tot_obt) / sum(sum_d2$tot_exp), 3),
-    round(pct_obt_60p * 100, 1),
-    round(pct_exp_60p * 100, 1),
-    round(dep_idx, 3)
+    pct_obt_60p_r,
+    pct_exp_60p_r,
+    dep_idx_r
   )
 ) |>
   gt() |>
@@ -170,13 +191,14 @@ tibble(
   tab_options(table.font.size = 13)
 ```
 
-A idade média ponderada de $\approx 45$ anos e o índice de dependência de $\approx 0{,}26$
-apontam para um plano em maturidade intermediária: a massa ainda é predominantemente
-ativa, mas o peso dos assistidos nas idades avançadas já responde por $89{,}7\%$ dos
-óbitos. Planos com índice de dependência acima de $0{,}5$ são considerados
-demograficamente maduros [@pitacco2007]; este fundo está em trajetória ascendente,
-o que implica crescimento estrutural da sinistralidade mesmo sem piora intrínseca
-das taxas de mortalidade.
+A idade média ponderada de $\approx `r idade_media_r`$ anos e o índice de
+dependência de $\approx `r dep_idx_r`$ apontam para um plano em maturidade
+intermediária: a massa ainda é predominantemente ativa, mas o peso dos assistidos
+nas idades avançadas já responde por `r pct_obt_60p_r`% dos óbitos. Planos
+com índice de dependência acima de $0{,}5$ são considerados demograficamente
+maduros [@pitacco2007]; este fundo está em trajetória ascendente, o que implica
+crescimento estrutural da sinistralidade mesmo sem piora intrínseca das taxas
+de mortalidade.
 
 ## Pirâmide etária da exposição
 
@@ -201,6 +223,12 @@ piramide <- sum_d2 |>
   mutate(pct_exp = Expostos / sum(Expostos) * 100,
          pct_obt = Obitos   / sum(Obitos)   * 100)
 
+# Variáveis inline para o parágrafo
+pct_exp_1840_4060 <- round(sum(piramide$pct_exp[piramide$faixa %in% c("[18, 40)", "[40, 60)")]), 1)
+pct_obt_1840_4060 <- round(sum(piramide$pct_obt[piramide$faixa %in% c("[18, 40)", "[40, 60)")]), 1)
+pct_exp_6080_80p  <- round(sum(piramide$pct_exp[piramide$faixa %in% c("[60, 80)", "80+")]), 1)
+pct_obt_6080_80p  <- round(sum(piramide$pct_obt[piramide$faixa %in% c("[60, 80)", "80+")]), 1)
+
 p_exp <- ggplot(piramide, aes(x = faixa, y = pct_exp, fill = faixa)) +
   geom_col(alpha = 0.85, width = 0.7) +
   geom_text(aes(label = sprintf("%.1f%%", pct_exp)), hjust = -0.1, size = 3.2) +
@@ -223,11 +251,12 @@ p_exp + p_obt +
   plot_annotation(title = "Distribuição relativa de expostos e óbitos por faixa etária")
 ```
 
-A pirâmide evidencia a assimetria estrutural do fundo: $73{,}4\%$ dos expostos
-pertencem às faixas $[18, 40)$ e $[40, 60)$, mas apenas $10{,}3\%$ dos óbitos.
-As faixas $[60, 80)$ e $80+$ reúnem $26{,}4\%$ da exposição e $89{,}7\%$ dos
-sinistros. Esse desacoplamento justifica o modelo de credibilidade com pesos de
-volume distintos por faixa — a informação de cada grupo contribui de forma
+A pirâmide evidencia a assimetria estrutural do fundo: `r pct_exp_1840_4060`%
+dos expostos pertencem às faixas [18, 40) e [40, 60), mas apenas
+`r pct_obt_1840_4060`% dos óbitos. As faixas [60, 80) e 80+ reúnem
+`r pct_exp_6080_80p`% da exposição e `r pct_obt_6080_80p`% dos sinistros.
+Esse desacoplamento é o que justifica o modelo de credibilidade com pesos de
+volume distintos por faixa: a informação de cada grupo contribui de forma
 desigual para a estimativa do nível global $\lambda_0$.
 
 ## Distribuição etária da exposição e dos óbitos
@@ -250,14 +279,20 @@ p2 <- ggplot(fundo_long, aes(x = Idade, y = Obitos, colour = Ano)) +
   theme_bw(base_size = 11) + theme(legend.position = "bottom")
 
 p1 + p2
+
+# Variáveis inline para o parágrafo
+exp_19_trienio <- sum(fundo_long$Expostos[fundo_long$Idade == 19])
+idade_max_obt  <- sum_d2$Idade[which.max(sum_d2$tot_obt)]
+obt_max_trienio <- max(sum_d2$tot_obt)
 ```
 
 A distribuição de expostos exibe dois picos: o principal entre 19 e 22 anos
-(entrada de jovens no plano, com idade 19 acumulando $\approx 22\,000$
+(entrada de jovens no plano, com idade 19 acumulando
+$\approx `r format(round(exp_19_trienio / 1000, 0), big.mark = ".", decimal.mark = ",")`\,000$
 pessoas-ano no triênio) e um secundário entre 40 e 55 anos. Os óbitos
-concentram-se acima dos 60 anos, com máximo em torno de 84 anos
-(175 óbitos no triênio). A estabilidade temporal das curvas indica ausência
-de choques na composição da carteira no período.
+concentram-se acima dos 60 anos, com máximo em torno de `r idade_max_obt` anos
+(`r obt_max_trienio` óbitos no triênio). A estabilidade temporal das curvas
+indica ausência de choques na composição da carteira no período.
 
 ## Log da taxa de mortalidade e heatmap idade$\times$ano
 
@@ -373,9 +408,13 @@ spark_df |>
   ) |>
   gt_plt_sparkline(
     tendencia,
-    type       = "shaded",
+    type       = "default",
     same_limit = FALSE,
-    palette    = c("steelblue4", "steelblue2", "steelblue4", "white", "steelblue1")
+    palette    = c("steelblue4", "steelblue4", "steelblue4", "steelblue4", "steelblue4")
+  ) |>
+  tab_style(
+    style     = cell_fill(color = "white"),
+    locations = cells_body(columns = tendencia)
   ) |>
   sub_missing(columns = CV, missing_text = "—") |>
   fmt_number(columns = c(`2012`, `2013`, `2014`), decimals = 0) |>
@@ -401,12 +440,19 @@ spark_df |>
 ```
 
 A tabela com sparklines comprime em uma linha por grupo toda a informação relevante:
-os três valores anuais, o CV e a trajetória visual. A faixa $80+$ (destacada em azul)
-exibe crescimento monotônico (524 → 583 → 683), sinal do envelhecimento progressivo
-da carteira. A faixa $[18, 40)$ tem CV elevado ($22{,}4\%$, destacado em amarelo)
-por oscilar sobre uma base pequena de 22–34 óbitos/ano. A faixa $[0, 18)$ registra
-zero óbitos nos três anos — sua taxa credibilizada virá inteiramente do nível
-coletivo $\hat{\lambda}_0$.
+os três valores anuais, o CV e a trajetória visual. A faixa 80+ (destacada em azul)
+exibe crescimento monotônico de
+`r spark_df[["2012"]][spark_df$faixa == "80+"]`
+para `r spark_df[["2013"]][spark_df$faixa == "80+"]`
+para `r spark_df[["2014"]][spark_df$faixa == "80+"]` óbitos,
+sinal do envelhecimento progressivo da carteira. A faixa $[18, 40)$ tem CV elevado
+(`r round(spark_df$CV[spark_df$faixa == "[18, 40)"], 1)`%, destacado em amarelo)
+por oscilar entre
+`r min(spark_df[["2012"]][spark_df$faixa == "[18, 40)"], spark_df[["2013"]][spark_df$faixa == "[18, 40)"], spark_df[["2014"]][spark_df$faixa == "[18, 40)"])`
+e
+`r max(spark_df[["2012"]][spark_df$faixa == "[18, 40)"], spark_df[["2013"]][spark_df$faixa == "[18, 40)"], spark_df[["2014"]][spark_df$faixa == "[18, 40)"])`
+óbitos por ano. A faixa $[0, 18)$ registra zero óbitos nos três anos; sua taxa
+credibilizada virá inteiramente do nível coletivo $\hat{\lambda}_0$.
 
 ## Curva de sobrevivência acumulada
 
@@ -438,9 +484,11 @@ ggplot(lx_df |> filter(Idade <= 110), aes(x = Idade, y = lx)) +
 A curva $l_x$ parte de 100.000 nascidos vivos e decresce de acordo com as taxas
 centrais observadas no triênio, sob a hipótese de força de mortalidade constante
 dentro de cada ano de idade ($p_x = e^{-\hat{m}_x}$). A queda mais acentuada
-ocorre acima dos 60 anos, com a curva atingindo $\approx 25{,}000$ aos 80 anos —
-consistente com o índice de dependência de $0{,}26$ calculado anteriormente.
-As linhas pontilhadas marcam as fronteiras das faixas etárias definidas na questão (ii).
+ocorre acima dos 60 anos, com a curva atingindo
+$\approx `r format(round(lx_df$lx[lx_df$Idade == 80], -2), big.mark=".", decimal.mark=",")`$
+aos 80 anos — consistente com o índice de dependência de `r dep_idx_r` calculado
+anteriormente. As linhas pontilhadas marcam as fronteiras das faixas etárias
+definidas na questão (ii).
 
 ---
 
@@ -456,9 +504,10 @@ suavemente para que a taxa agregada seja representativa. A linearidade em log na
 faixas adultas indica que intervalos de 20 anos mantêm homogeneidade razoável.
 
 **Exposição suficiente.** O modelo pondera cada observação pelo volume
-$v_{it} = E_{it}$ (pessoas-ano). Com $T = 3$ e $m = 5$, os parâmetros estruturais
-$\hat{\lambda}_0$ e $\hat{\tau}^2$ são estimados com $m - 1 = 4$ graus de
-liberdade para a componente entre grupos — mínimo aceitável. Grupos com
+$v_{it} = E_{it}$ (pessoas-ano). Com $T = 2$ anos de ajuste e $m = 4$ grupos
+(excluindo $[0, 18)$ por ausência de sinistros), os parâmetros estruturais
+$\hat{\lambda}_0$ e $\hat{\tau}^2$ são estimados com $m - 1 = 3$ graus de
+liberdade para a componente entre grupos. Grupos com
 $v_{it} \approx 0$ recebem peso negligenciável automaticamente.
 
 **Relevância atuarial.** Os grupos devem capturar os regimes de risco que
@@ -515,16 +564,21 @@ sum_faixas |>
   fmt_percent(columns = c(pct_exp, pct_obt), decimals = 1) |>
   fmt_number(columns = cv, decimals = 3) |>
   tab_options(table.font.size = 13)
+
+# Variáveis inline dos CVs
+cv_4060 <- round(cv_data$cv[cv_data$faixa == "[40, 60)"] * 100, 1)
+cv_1840 <- round(cv_data$cv[cv_data$faixa == "[18, 40)"] * 100, 1)
+cv_80p  <- round(cv_data$cv[cv_data$faixa == "80+"]      * 100, 1)
 ```
 
 O coeficiente de variação (CV) dos óbitos anuais quantifica a estabilidade
-temporal de cada grupo. A faixa $[40, 60)$ tem CV $= 3{,}8\%$, a mais estável,
-enquanto $[18, 40)$ atinge $22{,}4\%$ — reflexo de contagens baixas e raras onde
-um ou dois óbitos a mais ou a menos representam variação percentual expressiva.
-A faixa $80+$ tem CV $= 13{,}5\%$ por exposição reduzida em idades muito avançadas.
-No modelo de Bühlmann-Straub, esses grupos de alta variabilidade recebem menor
-peso $v_{it}$ e, consequentemente, menor credibilidade $\omega_i$ em favor do
-nível coletivo $\lambda_0$.
+temporal de cada grupo. A faixa [40, 60) tem CV $= `r cv_4060`\%$, a mais
+estável, enquanto [18, 40) atinge `r cv_1840`%, reflexo de contagens
+baixas e raras em que um ou dois óbitos a mais ou a menos representam variação
+percentual expressiva. A faixa $80+$ tem CV $= `r cv_80p`\%$ por exposição
+reduzida em idades muito avançadas. No modelo de Bühlmann-Straub, esses grupos
+de alta variabilidade recebem menor peso $v_{it}$ e, consequentemente, menor
+credibilidade $\omega_i$ em favor do nível coletivo $\lambda_0$.
 
 ## Visualização das faixas e curva de mortalidade
 
@@ -590,8 +644,8 @@ Avaliamos:
 
 - **AT-2000 masculina** [@soa2000]: tábua americana de rentistas, adotada
   historicamente no Brasil por ausência de alternativa nacional. A principal
-  limitação é o viés de tradução demográfica — a mortalidade americana de
-  rentistas de 2000 é substancialmente diferente da mortalidade brasileira atual.
+  limitação é o viés de tradução demográfica: a mortalidade americana de
+  rentistas de 2000 difere substancialmente da mortalidade brasileira atual.
 - **BR-EMSsb-m v.2021** [@brems2021]: tábua construída com dados de apólices
   do mercado segurador brasileiro, publicada pela FenaPrevi em 2021. Representa
   a experiência nacional mais recente e é a referência regulatória atual.
@@ -643,8 +697,8 @@ ggplot(frame_comp |> filter(!is.na(qx_obs), qx_obs > 0), aes(x = Idade)) +
 Os dados do fundo fornecem diretamente a **taxa central de mortalidade**
 $\hat{m}_x = D_x / E_x$, enquanto as tábuas AT-2000 e BR-EMSsb-m estão
 calibradas em **probabilidade de morte** $q_x$. Para que a comparação e a razão
-A/E sejam conceitualmente coerentes — observado e esperado medidos na mesma
-escala — convertemos a taxa central observada por meio da relação de força constante:
+A/E sejam conceitualmente coerentes (observado e esperado na mesma escala),
+convertemos a taxa central observada por meio da relação de força constante:
 
 $$
 \hat{q}_x = 1 - e^{-\hat{m}_x}.
@@ -719,11 +773,13 @@ girafe(
 )
 ```
 
-A AT-2000 superestima a mortalidade em todas as faixas (A/E $< 1$), com desvios de
-$7\%$ em $[60, 80)$ a $35\%$ em $[40, 60)$. A BR-EMSsb-m v.2021 é mais aderente:
-apresenta A/E próximo de 1 nas faixas intermediárias, subestima ligeiramente em
-$[60, 80)$ (A/E $= 1{,}032$) e superestima em $80+$ (A/E $= 0{,}829$), provavelmente
-por instabilidade das taxas observadas nessa faixa.
+A AT-2000 superestima a mortalidade em todas as faixas (A/E $< 1$). A BR-EMSsb-m
+v.2021 é mais aderente: apresenta A/E próximo de 1 nas faixas intermediárias,
+subestima ligeiramente em [60, 80)
+(A/E $= `r round(frame_ae$ae_br[frame_ae$faixa == "[60, 80)"], 3)`$)
+e superestima em $80+$
+(A/E $= `r round(frame_ae$ae_br[frame_ae$faixa == "80+"], 3)`$),
+provavelmente por instabilidade das taxas observadas nessa faixa.
 
 ## Testes estatísticos de aderência
 
@@ -801,16 +857,25 @@ que usa estatística matricial) ou que não produzem $p$-valor analítico (KS
 assintótico, BayesCI baseado em intervalo). Isso não indica falha computacional;
 é uma característica do design dos testes @melo2026.
 
-Ambas as tábuas rejeitam $H_0$ nos 11 testes. Com 3.658 óbitos e A/E $= 0{,}89$
-para a BR-EMS, o desvio representa $\approx 7$ erros-padrão Poisson
-($\text{DP} \approx 1/\sqrt{4119} \approx 0{,}016$), tornando a rejeição
-praticamente certa para qualquer $\alpha$ usual. A rejeição universal é esperada
-quando a tábua não foi calibrada especificamente para a população analisada
-[@melo2026]. A BR-EMS produz estatísticas de teste substancialmente menores
-(Qui-quadrado: $469 \to 409$; LRT Poisson: $192 \to 54$), confirmando menor
-grau de desajuste. Os testes NB também rejeitam, descartando superdispersão como
-explicação alternativa. A BR-EMSsb-m v.2021 é, portanto, a tábua de referência
-adotada para o modelo de Bühlmann-Straub.
+Ambas as tábuas rejeitam $H_0$ nos 11 testes. Com
+`r res_br$observed_deaths` óbitos e
+A/E $= `r round(res_br$ae_ratio, 2)`$ para a BR-EMS, o desvio representa
+$\approx `r round((1 - res_br$ae_ratio) / (1/sqrt(res_br$expected_deaths)), 0)`$
+erros-padrão Poisson
+($\text{DP} \approx 1/\sqrt{`r round(res_br$expected_deaths, 0)`} \approx
+`r round(1/sqrt(res_br$expected_deaths), 3)`$), tornando a rejeição praticamente
+certa para qualquer $\alpha$ usual. A rejeição universal é esperada quando a
+tábua não foi calibrada especificamente para a população analisada [@melo2026].
+A BR-EMS produz estatísticas de teste substancialmente menores
+(Qui-quadrado:
+$`r round(res_at$summary$statistic[res_at$summary$test == "ChiSquare"], 0)` \to
+`r round(res_br$summary$statistic[res_br$summary$test == "ChiSquare"], 0)`$;
+LRT Poisson:
+$`r round(res_at$summary$statistic[res_at$summary$test == "LRTI_P"], 0)` \to
+`r round(res_br$summary$statistic[res_br$summary$test == "LRTI_P"], 0)`$),
+confirmando menor grau de desajuste. Os testes NB também rejeitam, descartando
+superdispersão como explicação alternativa. A BR-EMSsb-m v.2021 é, portanto, a
+tábua de referência adotada para o modelo de Bühlmann-Straub.
 
 ---
 
@@ -821,11 +886,12 @@ adotada para o modelo de Bühlmann-Straub.
 ```{r tabela-perfis}
 #| label: tabela-perfis
 
+labels_fx_m4  <- c("[18, 40)", "[40, 60)", "[60, 80)", "80+")
+
 tibble(
-  Grupo = 1:5,
-  Faixa = labels_fx,
+  Grupo = 1:4,
+  Faixa = labels_fx_m4,
   Descrição = c(
-    "Menores/adolescentes; exposição residual; zero óbitos",
     "Jovens trabalhadores; mortalidade baixa; CV = 22,4%",
     "Trabalhadores ativos; mortalidade crescente; CV = 3,8%",
     "Aposentados; 40,8% dos óbitos; CV = 6,0%",
@@ -835,7 +901,10 @@ tibble(
   left_join(sum_faixas |> select(faixa, tot_exp, tot_obt, tx_media),
             by = c("Faixa" = "faixa")) |>
   gt() |>
-  tab_header(title = "Perfis de risco para o modelo de Bühlmann-Straub") |>
+  tab_header(
+    title    = "Perfis de risco para o modelo de Bühlmann-Straub ($m = 4$)",
+    subtitle = "A faixa [0, 18) é excluída do modelo por ausência de sinistros em 2012--2013"
+  ) |>
   cols_label(
     Grupo="Grupo", Faixa="Faixa", Descrição="Caracterização",
     tot_exp="Expostos totais", tot_obt="Óbitos totais",
@@ -852,13 +921,13 @@ tibble(
 
 ## Formulação do modelo
 
-Seguindo @buhlmann2005 e @klugman2012, define-se para cada grupo de risco $i = 1, \ldots, m$
-e período $t = 1, 2$:
+Seguindo @buhlmann2005 e @klugman2012, define-se para cada grupo de risco
+$i = 1, \ldots, m$ e período $t = 1, 2$:
 
 $$
 F_{it} = \frac{N_{it}}{v_{it}}, \qquad
 E[N_{it} \mid \theta_i] = \text{Var}[N_{it} \mid \theta_i] = v_{it}\,\lambda(\theta_i),
-\quad \text{com } \lambda(\theta_i) = \lambda_0\,\theta_i.
+\quad \text{com } \lambda(\theta_i) = \lambda_0\,\theta_i,
 $$
 
 onde $N_{it}$ é o número de óbitos do grupo $i$ no ano $t$ e $v_{it} = E_{it}$ é a
@@ -869,7 +938,12 @@ dinâmica de contagem do diagrama de Lexis [@rau2018].
 Este modelo é um caso particular do modelo de Bühlmann-Straub com $X_{it} = F_{it}$
 e $\sigma^2(\theta_i) = \lambda(\theta_i)$. Os parâmetros estruturais reduzem-se
 a apenas dois: o nível global $\lambda_0$ e a variância entre grupos $\tau^2$,
-com $\sigma^2 = \lambda_0$ [@buhlmann2005, cap.~4].
+com $\sigma^2 = \lambda_0$ [@buhlmann2005, cap. 4].
+
+A faixa $[0, 18)$ é excluída da análise de credibilidade pois não apresenta
+sinistros em 2012--2013, tornando a frequência observada identicamente nula e
+inviabilizando a estimação de uma taxa própria. O modelo opera com $m = 4$
+grupos: $[18, 40)$, $[40, 60)$, $[60, 80)$ e $80+$.
 
 O modelo é **ajustado com os dados de 2012 e 2013** ($T = 2$) e a previsão para
 2014 é confrontada com os óbitos efetivamente observados nesse ano, servindo
@@ -887,7 +961,7 @@ c_2 = \frac{m}{m-1}\sum_i \frac{v_i}{v}\left(\bar{F}_i^v - \bar{\bar{F}}^v\right
 $$
 
 onde $v_i = \sum_{t=1}^{2} v_{it}$ e $v = \sum_i v_i$ (total de pessoas-ano em
-2012--2013); a frequência volume-ponderada do grupo $i$ é
+2012--2013 para os $m = 4$ grupos); a frequência volume ponderada do grupo $i$ é
 $\bar{F}_i^v = \sum_t (v_{it}/v_i)\,F_{it}$; e $\bar{\bar{F}}^v = \sum_i (v_i/v)\,\bar{F}_i^v$
 é a média global.
 
@@ -918,8 +992,9 @@ bs_data <- fundo_long |>
   summarise(vit = sum(Expostos), Nit = sum(Obitos), .groups = "drop") |>
   mutate(Fit = if_else(vit > 0, Nit / vit, 0))
 
-# ── AJUSTE: apenas 2012 e 2013 ──────────────────────────────────────────────
-bs_ajuste <- bs_data |> filter(Ano %in% c("2012", "2013"))
+# ── AJUSTE: apenas 2012-2013 e m=4 grupos (exclui [0,18) — zero sinistros) ──
+bs_ajuste <- bs_data |>
+  filter(Ano %in% c("2012", "2013"), faixa != "[0, 18)")
 
 vi_df <- bs_ajuste |>
   group_by(faixa) |>
@@ -932,7 +1007,7 @@ vi_df <- bs_ajuste |>
 v_total <- sum(vi_df$vi)
 m       <- nrow(vi_df)
 
-# Fbarbar (média global volume-ponderada, 2012-2013)
+# Fbarbar (média global volume ponderada, 2012-2013)
 Fbarbar <- sum(vi_df$vi * vi_df$Fbar_v) / v_total
 
 # c1, c2
@@ -1051,30 +1126,36 @@ resultados |>
   tab_options(table.font.size = 13)
 ```
 
-$\hat{\kappa}$ pequeno significa heterogeneidade entre grupos grande em relação ao
-ruído de processo ($\hat{\tau}^2/\hat{\sigma}^2 = 1/\hat{\kappa}$): as taxas de
-mortalidade variam muito mais entre faixas etárias do que dentro de cada faixa ao
-longo dos anos. Como todas as $v_i$ superam $\hat{\kappa}$ em várias ordens de
-grandeza, os fatores de credibilidade $\hat{\omega}_i$ são próximos de 1 para os
-grupos com óbitos positivos. O único grupo com encolhimento substantivo é $[0, 18)$:
-com zero óbitos em 2012--2013, sua taxa credibilizada provém inteiramente do
-nível coletivo $\hat{\lambda}_0$.
+$\hat{\kappa} = `r round(kappa_hat, 1)`$ pequeno significa heterogeneidade
+entre grupos grande em relação ao ruído de processo
+($\hat{\tau}^2/\hat{\sigma}^2 = 1/\hat{\kappa} \approx
+`r round(tau2/lam0 * 100, 1)`\%$): as taxas de mortalidade variam muito mais
+entre faixas etárias do que dentro de cada faixa ao longo dos anos. Como todas
+as $v_i$ superam $\hat{\kappa}$ em várias ordens de grandeza, os fatores de
+credibilidade $\hat{\omega}_i$ são próximos de 1 para todos os $m = 4$ grupos,
+indicando que a experiência própria de cada faixa domina a estimativa.
 
-## Previsão para 2014 e validação fora da amostra
+## Prêmio de credibilidade e previsão para 2015
 
-O número esperado de sinistros para o grupo $i$ em 2014, usando a exposição
-observada nesse ano como $v_i^*$, é:
+O **prêmio de credibilidade** do grupo $i$ é a taxa credibilizada:
 
 $$
-\hat{N}_i^* = v_{i,2014} \cdot \hat{\lambda}_i^H.
+P_i^{\text{cred}} = \hat{\lambda}_i^H = \hat{\omega}_i\,\bar{F}_i^v + (1 - \hat{\omega}_i)\,\hat{\lambda}_0.
 $$
 
-```{r previsao}
-#| label: previsao
+O **número esperado de sinistros** para o próximo período (2015) é obtido
+multiplicando o prêmio pela exposição projetada. Adotamos $v_i^* = E_{i,2014}$
+(último ano disponível) como estimativa da exposição de 2015:
 
-# Exposição e óbitos observados em 2014 (validação)
+$$
+\hat{N}_i^{(2015)} = v_i^* \cdot P_i^{\text{cred}} = v_i^* \cdot \hat{\lambda}_i^H.
+$$
+
+```{r previsao-2015-bs}
+#| label: previsao-2015-bs
+
 val_2014 <- bs_data |>
-  filter(Ano == "2014") |>
+  filter(Ano == "2014", faixa != "[0, 18)") |>
   select(faixa, v_2014 = vit, N_obs_2014 = Nit)
 
 previsao <- resultados |>
@@ -1087,33 +1168,77 @@ previsao <- resultados |>
   )
 
 previsao |>
-  select(faixa, v_2014, lam_cred, N_prev, N_obs_2014, erro_pct) |>
+  select(faixa, lam_cred, v_2014, N_prev) |>
   bind_rows(
-    tibble(faixa       = "Total",
-           v_2014      = sum(previsao$v_2014),
-           lam_cred    = NA_real_,
-           N_prev      = sum(previsao$N_prev),
-           N_obs_2014  = sum(previsao$N_obs_2014),
-           erro_pct    = (sum(previsao$N_prev) - sum(previsao$N_obs_2014)) /
-                          sum(previsao$N_obs_2014) * 100)
+    tibble(faixa    = "Total",
+           lam_cred = NA_real_,
+           v_2014   = sum(previsao$v_2014),
+           N_prev   = sum(previsao$N_prev))
   ) |>
   gt() |>
   tab_header(
-    title    = "Previsão para 2014 vs. observado (validação fora da amostra)",
+    title    = "Prêmios de credibilidade BS e número esperado de sinistros (2015)",
+    subtitle = md("Ajuste com 2012--2013; $v_i^* = E_{i,2014}$ como proxy de 2015")
+  ) |>
+  cols_label(
+    faixa    = "Grupo",
+    lam_cred = md("$P_i^{\\text{cred}} = \\hat{\\lambda}_i^H$"),
+    v_2014   = md("$v_i^*$ (exp. 2014)"),
+    N_prev   = md("$\\hat{N}_i^{(2015)}$")
+  ) |>
+  fmt_number(columns = lam_cred, decimals = 6) |>
+  fmt_number(columns = v_2014,   decimals = 0) |>
+  fmt_number(columns = N_prev,   decimals = 1) |>
+  sub_missing(columns = lam_cred, missing_text = "—") |>
+  tab_style(
+    style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
+    locations = cells_body(rows = faixa == "Total")
+  ) |>
+  tab_options(table.font.size = 13)
+```
+
+O modelo prevê `r round(sum(previsao$N_prev), 0)` sinistros para 2015 com a
+exposição de 2014. As faixas $[60, 80)$ e $80+$ respondem por cerca de
+`r round((previsao$N_prev[previsao$faixa == "[60, 80)"] + previsao$N_prev[previsao$faixa == "80+"]) / sum(previsao$N_prev) * 100, 1)`%
+do total previsto, reflexo da concentração de mortalidade nas idades avançadas.
+
+## Validação fora da amostra (2014)
+
+Como exercício de avaliação do modelo, confrontamos a previsão gerada para 2014
+(usando ajuste em 2012--2013 e exposição de 2014) com os óbitos efetivamente
+observados nesse ano:
+
+```{r validacao-2014-bs}
+#| label: validacao-2014-bs
+
+previsao |>
+  select(faixa, v_2014, lam_cred, N_prev, N_obs_2014, erro_pct) |>
+  bind_rows(
+    tibble(faixa      = "Total",
+           v_2014     = sum(previsao$v_2014),
+           lam_cred   = NA_real_,
+           N_prev     = sum(previsao$N_prev),
+           N_obs_2014 = sum(previsao$N_obs_2014),
+           erro_pct   = (sum(previsao$N_prev) - sum(previsao$N_obs_2014)) /
+                         sum(previsao$N_obs_2014) * 100)
+  ) |>
+  gt() |>
+  tab_header(
+    title    = "Validação fora da amostra: previsão 2014 vs. observado",
     subtitle = "Ajuste com 2012--2013; validação em 2014"
   ) |>
   cols_label(
     faixa      = "Grupo",
     v_2014     = md("$v_i^*$ (exp. 2014)"),
     lam_cred   = md("$\\hat{\\lambda}_i^H$"),
-    N_prev     = md("$\\hat{N}_i^*$ (previsto)"),
+    N_prev     = md("$\\hat{N}_i^*$"),
     N_obs_2014 = md("$N_i^{\\text{obs}}$ (2014)"),
     erro_pct   = "Erro (%)"
   ) |>
-  fmt_number(columns = v_2014,    decimals = 0) |>
-  fmt_number(columns = lam_cred,  decimals = 6) |>
+  fmt_number(columns = v_2014,   decimals = 0) |>
+  fmt_number(columns = lam_cred, decimals = 6) |>
   fmt_number(columns = c(N_prev, N_obs_2014), decimals = 1) |>
-  fmt_number(columns = erro_pct,  decimals = 1) |>
+  fmt_number(columns = erro_pct, decimals = 1) |>
   sub_missing(columns = c(lam_cred, erro_pct), missing_text = "—") |>
   tab_style(
     style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
@@ -1126,13 +1251,10 @@ previsao |>
   tab_options(table.font.size = 13)
 ```
 
-A previsão total de 2014, obtida com modelo ajustado apenas em 2012--2013,
-é comparada ao número de óbitos efetivamente observados. O erro percentual global
-mede o desempenho preditivo fora da amostra: desvios abaixo de $5\%$ em módulo
-indicam boa calibração do estimador de credibilidade para esse horizonte de um ano.
-As faixas com maior volume ($[40, 60)$ e $[60, 80)$) tendem a apresentar erros
-menores, pois a razão $v_i/\hat{\kappa}$ é mais elevada e a credibilidade é
-mais alta.
+O erro global de `r round((sum(previsao$N_prev) - sum(previsao$N_obs_2014)) / sum(previsao$N_obs_2014) * 100, 1)`%
+indica subestimação sistemática, reflexo da tendência crescente da carteira que
+dois anos de dados não capturam completamente. As faixas $[40, 60)$ e $[60, 80)$,
+com maior volume, apresentam erros menores por terem credibilidade mais elevada.
 
 ## Comparação com a tábua de referência
 
@@ -1148,7 +1270,7 @@ $$
 
 # Óbitos esperados pela tábua em 2014
 tabua_2014 <- fundo_long |>
-  filter(Ano == "2014") |>
+  filter(Ano == "2014", Idade >= 18) |>
   left_join(
     data.frame(Idade = brems$idade[1:116], qx_br = brems$brems2021sb.m[1:116]),
     by = "Idade"
@@ -1218,16 +1340,22 @@ comp_final |>
   tab_options(table.font.size = 13)
 ```
 
-A tabela destaca em verde o método com menor erro absoluto em cada faixa. A faixa
-$[0, 18)$ é excluída do cálculo de erro pois registra zero óbitos observados em
-2014. O estimador de Bühlmann-Straub supera a tábua nas faixas $[40, 60)$ e
+A tabela destaca em verde o método com menor erro absoluto em cada faixa. Com
+$m = 4$ grupos, a faixa $[0, 18)$ está excluída da análise por ausência de
+sinistros. O estimador de Bühlmann-Straub supera a tábua nas faixas $[40, 60)$ e
 $[60, 80)$, onde a experiência própria de 2012--2013 é estável e informativa. A
-tábua BR-EMS fica próxima do BS em $[60, 80)$ (erros de $-5{,}2\%$ vs. $-5{,}8\%$),
-mas superestima consideravelmente em $80+$ ($+14{,}6\%$) por não capturar a
-experiência específica desta carteira. O erro de $54\%$ na faixa $[18, 40)$ é
-comum a ambos os métodos: os 22 óbitos observados em 2014 representam uma queda
-atípica em relação a 2012--2013 (média de 33,5 óbitos), que nenhum modelo
-conseguiria prever a partir de dois anos de dados.
+tábua BR-EMS fica próxima do BS em $[60, 80)$
+(erros de `r round(comp_final$erro_bs[comp_final$faixa == "[60, 80)"], 1)`%
+vs. `r round(comp_final$erro_tab[comp_final$faixa == "[60, 80)"], 1)`%),
+mas superestima consideravelmente em $80+$
+(`r sprintf("%+.1f", round(comp_final$erro_tab[comp_final$faixa == "80+"], 1))`%)
+por não capturar a experiência específica desta carteira. O erro de
+`r round(comp_final$erro_bs[comp_final$faixa == "[18, 40)"], 0)`% na faixa
+$[18, 40)$ é comum a ambos os métodos: os
+`r bs_data$Nit[bs_data$faixa == "[18, 40)" & bs_data$Ano == "2014"]`
+óbitos observados em 2014 representam uma queda atípica em relação a 2012--2013
+(média de `r round(mean(bs_data$Nit[bs_data$faixa == "[18, 40)" & bs_data$Ano %in% c("2012","2013")]), 1)`
+óbitos), que nenhum modelo conseguiria prever com apenas dois anos de dados.
 
 ---
 
@@ -1279,10 +1407,10 @@ posterior via MCMC, propagando-a para os intervalos credíveis das previsões.
 ## Ajuste com Stan
 
 O modelo é especificado diretamente em Stan e ajustado via `rstan`. O código
-Stan implementa a parametrização não-centrada para os efeitos aleatórios
+Stan implementa a parametrização não centrada para os efeitos aleatórios
 ($u_i = \sigma_u \cdot \tilde{u}_i$, com $\tilde{u}_i \sim \mathcal{N}(0,1)$),
 que melhora a geometria do espaço paramétrico e reduz divergências no amostrador
-NUTS quando $m$ é pequeno [@gelman2014].
+NUTS quando $m$ é pequeno [@gelman2014]. Aqui $m = 4$.
 
 ```{r stan-ajuste}
 #| label: stan-ajuste
@@ -1293,15 +1421,17 @@ NUTS quando $m$ é pequeno [@gelman2014].
 
 library(rstan)
 options(mc.cores        = parallel::detectCores())
-options(rstan.progress  = FALSE)   # desativa janela HTML de progresso (Windows)
+options(rstan.progress  = FALSE)
 options(rstan.verbose   = FALSE)
 rstan_options(auto_write = TRUE)
 
-# ── Dados de ajuste: apenas 2012 e 2013 ──────────────────────────────────────
+# ── Dados de ajuste: apenas 2012 e 2013, m=4 (sem [0, 18)) ──────────────────
 bs_ajuste_bayes <- bs_data |>
-  filter(Ano %in% c("2012", "2013"), vit > 0) |>
+  filter(Ano %in% c("2012", "2013"), vit > 0, faixa != "[0, 18)") |>
   mutate(
-    faixa_id = as.integer(factor(faixa, levels = levels(faixa))),
+    # droplevels garante que [0,18) sai dos levels antes de as.integer
+    faixa    = droplevels(faixa),
+    faixa_id = as.integer(faixa),   # agora 1=[18,40), 2=[40,60), 3=[60,80), 4=80+
     log_vit  = log(vit)
   ) |>
   arrange(faixa_id, Ano)
@@ -1312,33 +1442,31 @@ stan_data <- list(
   group   = bs_ajuste_bayes$faixa_id,
   log_v   = bs_ajuste_bayes$log_vit,
   y       = bs_ajuste_bayes$Nit,
-  mu_beta = log(Fbarbar)          # priori centrada na log-taxa global 2012-2013
+  mu_beta = log(Fbarbar)
 )
 
 stan_code <- "
 data {
-  int<lower=1> N;               // numero de observacoes
-  int<lower=1> m;               // numero de grupos
-  array[N] int<lower=1> group;  // indicador de grupo
-  vector[N] log_v;              // log da exposicao (offset)
-  array[N] int<lower=0> y;      // numero de obitos
-  real mu_beta;                 // media da priori de beta0
+  int<lower=1> N;
+  int<lower=1> m;
+  array[N] int<lower=1> group;
+  vector[N] log_v;
+  array[N] int<lower=0> y;
+  real mu_beta;
 }
 parameters {
-  real beta0;                   // intercepto global
-  real<lower=0> sigma_u;        // desvio padrao dos efeitos aleatórios
-  vector[m] u_tilde;            // efeitos aleatórios nao-centrados
+  real beta0;
+  real<lower=0> sigma_u;
+  vector[m] u_tilde;
 }
 transformed parameters {
   vector[m] u;
-  u = sigma_u * u_tilde;        // parametrizacao nao-centrada
+  u = sigma_u * u_tilde;
 }
 model {
-  // Prioris
   beta0   ~ normal(mu_beta, 1);
   sigma_u ~ exponential(1);
   u_tilde ~ std_normal();
-  // Verossimilhanca
   for (n in 1:N) {
     y[n] ~ poisson_log(beta0 + u[group[n]] + log_v[n]);
   }
@@ -1346,35 +1474,54 @@ model {
 generated quantities {
   vector[m] lambda_i;
   array[N] int y_rep;
-  lambda_i = exp(beta0 + u);    // taxa posterior por grupo
+  lambda_i = exp(beta0 + u);
   for (n in 1:N) {
     y_rep[n] = poisson_log_rng(beta0 + u[group[n]] + log_v[n]);
   }
 }
 "
 
-# ── Compilar modelo com nome informativo (auto_write=TRUE reutiliza o DSO) ───
-mod_efpc <- stan_model(
-  model_code = stan_code,
-  model_name = "poisson_hier_efpc",
-  verbose    = FALSE
-)
+rds_path <- "fit_stan_efpc.rds"
 
-# ── Amostrar ─────────────────────────────────────────────────────────────────
-fit_stan <- sampling(
-  object  = mod_efpc,
-  data    = stan_data,
-  chains  = 4,
-  iter    = 4000,
-  warmup  = 2000,
-  seed    = 2026,
-  refresh = 0,
-  verbose = FALSE,
-  control = list(adapt_delta = 0.99, max_treedepth = 15)
-)
+# Verificar compatibilidade pelo número de grupos (lambda_i tem dim [draws, m])
+rds_valido <- FALSE
+if (file.exists(rds_path)) {
+  fit_salvo <- tryCatch(readRDS(rds_path), error = function(e) NULL)
+  if (!is.null(fit_salvo)) {
+    dims_lam <- tryCatch(
+      dim(rstan::extract(fit_salvo, pars = "lambda_i")$lambda_i),
+      error = function(e) NULL
+    )
+    # Válido apenas se número de grupos salvo == m atual
+    rds_valido <- !is.null(dims_lam) && dims_lam[2] == stan_data$m
+  }
+  if (!rds_valido)
+    message("Stan: rds incompatível (m salvo ≠ m=", stan_data$m, ") — reajustando.")
+}
 
-# Salvar objeto ajustado — evita re-amostrar em renders subsequentes
-saveRDS(fit_stan, file = "fit_stan_efpc.rds")
+if (rds_valido) {
+  fit_stan <- fit_salvo
+  message("Stan: carregando fit salvo (m=", stan_data$m, ")")
+} else {
+  mod_efpc <- stan_model(
+    model_code = stan_code,
+    model_name = "poisson_hier_efpc",
+    verbose    = FALSE
+  )
+  fit_stan <- sampling(
+    object  = mod_efpc,
+    data    = stan_data,
+    chains  = 4,
+    iter    = 4000,
+    warmup  = 2000,
+    seed    = 2026,
+    refresh = 0,
+    verbose = FALSE,
+    control = list(adapt_delta = 0.99, max_treedepth = 15)
+  )
+  saveRDS(fit_stan, file = rds_path)
+  message("Stan: fit concluído e salvo (m=", stan_data$m, ")")
+}
 ```
 
 ```{r stan-summary}
@@ -1401,21 +1548,48 @@ mcmc_trace(posterior_arr) +
 ```
 
 As quatro cadeias MCMC mostram trajetórias bem misturadas e sem deriva temporal,
-indicando convergência para a distribuição posterior. $\hat{R} = 1{,}002$ para
-$\beta_0$ e $\hat{R} = 1{,}001$ para $\sigma_u$ — ambos essencialmente iguais a 1.
-O ESS efetivo é de 2.190 para $\beta_0$ e 1.895 para $\sigma_u$, bem acima do
-mínimo de 1.000 recomendado por @gelman2014 para estimação confiável de quantis.
-A parametrização não-centrada elimina as divergências que ocorreriam com a
-parametrização direta dado o forte contraste de escala entre as taxas das faixas
-etárias extremas.
+indicando convergência para a distribuição posterior. Os valores de $\hat{R}$ e
+ESS são extraídos diretamente do objeto ajustado:
 
-Os parâmetros estimados têm interpretação direta: $\hat{\beta}_0 = -5{,}21$
-(IC 95%: $[-6{,}57;\; -3{,}83]$) corresponde ao log da taxa global, ou seja,
-$e^{-5{,}21} \approx 0{,}0054$ — nível de mortalidade médio ponderado entre os
-grupos. A mediana de $\sigma_u = 2{,}03$ (IC 95%: $[1{,}18;\; 3{,}86]$) governa
+```{r stan-diag-metricas}
+#| label: stan-diag-metricas
+#| include: false
+
+summ_stan    <- summary(fit_stan, pars = c("beta0", "sigma_u"))$summary
+rhat_beta0   <- round(summ_stan["beta0",   "Rhat"], 3)
+rhat_sigma   <- round(summ_stan["sigma_u", "Rhat"], 3)
+ess_beta0    <- round(summ_stan["beta0",   "n_eff"])
+ess_sigma    <- round(summ_stan["sigma_u", "n_eff"])
+beta0_med    <- round(summ_stan["beta0",   "50%"], 2)
+beta0_lo     <- round(summ_stan["beta0",   "2.5%"], 2)
+beta0_hi     <- round(summ_stan["beta0",   "97.5%"], 2)
+sigma_med    <- round(summ_stan["sigma_u", "50%"], 2)
+sigma_lo     <- round(summ_stan["sigma_u", "2.5%"], 2)
+sigma_hi     <- round(summ_stan["sigma_u", "97.5%"], 2)
+
+# Razão entre taxas extremas para interpretação de sigma_u
+Fbar_80p   <- vi_df$Fbar_v[vi_df$faixa == "80+"]
+Fbar_1840  <- vi_df$Fbar_v[vi_df$faixa == "[18, 40)"]
+razao_fbar <- round(Fbar_80p / Fbar_1840, 0)
+fator_sigma <- round(exp(2 * sigma_med), 0)
+```
+
+$\hat{R} = `r rhat_beta0`$ para $\beta_0$ e $\hat{R} = `r rhat_sigma`$ para
+$\sigma_u$ — ambos essencialmente iguais a 1. O ESS efetivo é de `r ess_beta0`
+para $\beta_0$ e `r ess_sigma` para $\sigma_u$, bem acima do mínimo de 1.000
+recomendado por @gelman2014. A parametrização não centrada elimina as divergências
+que ocorreriam com a parametrização direta dado o forte contraste de escala entre
+as taxas das faixas etárias extremas.
+
+Os parâmetros estimados têm interpretação direta: $\hat{\beta}_0 = `r beta0_med`$
+(IC 95%: $[`r beta0_lo`;\; `r beta0_hi`]$) corresponde ao log da taxa global,
+ou seja, $e^{`r beta0_med`} \approx `r round(exp(beta0_med), 4)`$ — nível de
+mortalidade médio ponderado entre os grupos. A mediana de
+$\sigma_u = `r sigma_med`$ (IC 95%: $[`r sigma_lo`;\; `r sigma_hi`]$) governa
 a heterogeneidade entre faixas na escala log: dois grupos extremos diferem por um
-fator de $e^{2 \times 2{,}03} \approx 57$ em suas taxas esperadas, coerente com
-a razão observada $\bar{F}_{80+}/\bar{F}_{[18,40)} \approx 0{,}065/0{,}0005 = 130$.
+fator de $e^{2 \times `r sigma_med`} \approx `r fator_sigma`$ em suas taxas
+esperadas, coerente com a razão observada
+$\bar{F}_{80+}/\bar{F}_{[18,40)} \approx `r razao_fbar`$.
 O IC 95% de $\sigma_u$ exclui zero com folga, confirmando que a heterogeneidade
 entre faixas é real e substancial, não artefato amostral.
 
@@ -1440,8 +1614,8 @@ ppc_dens_overlay(
 Cada linha cinza é uma réplica $\tilde{N}_{it}$ amostrada da distribuição preditiva
 posterior; a linha escura são os valores observados. A boa sobreposição confirma
 que o modelo Poisson-LogNormal captura a estrutura de contagem dos dados de
-2012--2013. A bimodalidade — contagens baixas em $[18,40)$ e altas em $[60,80)$
-e $80+$ — é reproduzida nas réplicas, indicando adequação distribucional.
+2012--2013. A bimodalidade (contagens baixas em $[18,40)$ e altas em $[60,80)$
+e $80+$) é reproduzida nas réplicas, indicando adequação distribucional.
 
 ## Priori vs. posteriori de $\sigma_u$
 
@@ -1497,7 +1671,7 @@ $\bar{F}_{80+}/\bar{F}_{[18,40)}$.
 #| fig-height: 4.0
 
 lambda_draws <- rstan::extract(fit_stan, pars = "lambda_i")$lambda_i
-grupos_ord   <- levels(factor(bs_ajuste_bayes$faixa, levels = levels(bs_ajuste_bayes$faixa)))
+grupos_ord   <- levels(bs_ajuste_bayes$faixa)   # droplevels já aplicado: 4 grupos
 
 rate_summary <- tibble(
   faixa   = grupos_ord,
@@ -1548,7 +1722,7 @@ A sobreposição quase perfeita dos pontos em todas as faixas confirma empiricam
 a equivalência teórica entre os dois estimadores: as diferenças pontuais são
 inferiores a $0{,}4$ sinistros por grupo. O diferencial do modelo bayesiano está
 nas barras de erro, que quantificam a incerteza sobre a taxa de cada grupo — mais
-largas nas faixas com menos óbitos ($[18,40)$) e mais estreitas onde a contagem
+largas nas faixas com menos óbitos ([18, 40)) e mais estreitas onde a contagem
 é abundante ($80+$).
 
 ## Distribuição preditiva do total de sinistros (2014)
@@ -1559,17 +1733,20 @@ largas nas faixas com menos óbitos ($[18,40)$) e mais estreitas onde a contagem
 #| fig-height: 3.8
 #| fig-width: 8
 
-# Exposição de 2014 na ordem dos grupos
+# Exposição de 2014 na ordem dos grupos (m=4, sem [0,18))
 exp_2014_stan <- bs_data |>
-  filter(Ano == "2014") |>
-  mutate(faixa_id = as.integer(factor(faixa, levels = levels(faixa)))) |>
+  filter(Ano == "2014", faixa != "[0, 18)") |>
+  mutate(
+    faixa    = droplevels(faixa),
+    faixa_id = as.integer(faixa)
+  ) |>
   arrange(faixa_id) |>
   select(faixa, faixa_id, vit)
 
 # Total preditivo: soma sobre grupos da taxa posterior × exposição 2014
 total_draws <- as.numeric(lambda_draws %*% exp_2014_stan$vit)
 
-obs_2014 <- sum(bs_data$Nit[bs_data$Ano == "2014"])
+obs_2014 <- sum(bs_data$Nit[bs_data$Ano == "2014" & bs_data$faixa != "[0, 18)"])
 p_lo  <- quantile(total_draws, 0.025)
 p_hi  <- quantile(total_draws, 0.975)
 p_med <- median(total_draws)
@@ -1597,48 +1774,46 @@ ggplot(tibble(total = total_draws), aes(x = total)) +
   theme_bw(base_size = 12)
 ```
 
-A linha pontilhada vermelha marca o observado em 2014 (1.335 óbitos). A mediana
-da distribuição preditiva é $\approx 1.229$ sinistros, com IC 95% de
-$[1.144;\; 1.321]$. O observado de 1.335 situa-se **fora** do IC 95% pelo lado
-superior — o modelo, ajustado com 2012--2013, subestimou a mortalidade de 2014
-em $-7{,}9\%$, reflexo da tendência crescente da carteira que dois anos de dados
-não capturam completamente.
+A linha pontilhada vermelha marca o observado em 2014 (`r obs_2014` óbitos). A
+mediana da distribuição preditiva é $\approx `r round(p_med, 0)`$ sinistros,
+com IC 95% de $[`r round(p_lo, 0)`;\; `r round(p_hi, 0)`]$. O observado de
+`r obs_2014` situa-se **fora** do IC 95% pelo lado superior — o modelo, ajustado
+com 2012--2013, subestimou a mortalidade de 2014 em
+`r round((p_med - obs_2014)/obs_2014*100, 1)`%, reflexo da tendência
+crescente da carteira que dois anos de dados não capturam completamente.
 
 Para provisionamento de reservas, o percentil 95% da distribuição preditiva
-($\approx 1.321$ sinistros) representa o carregamento de segurança necessário para
-cobrir, com probabilidade $95\%$, o total de sinistros do próximo ano. A diferença
-entre o P95 e a mediana é de $1.321 - 1.229 = 92$ sinistros, ou aproximadamente
-$7{,}5\%$ de margem sobre a estimativa central — carregamento relevante do ponto
-de vista atuarial para um plano com tendência de envelhecimento estrutural.
+($\approx `r round(p_hi, 0)`$ sinistros) representa o carregamento de segurança
+necessário para cobrir, com probabilidade $95\%$, o total de sinistros do próximo
+ano. A diferença entre o P95 e a mediana é de
+$`r round(p_hi, 0)` - `r round(p_med, 0)` = `r round(p_hi - p_med, 0)`$
+sinistros, ou aproximadamente
+`r round((p_hi - p_med)/p_med*100, 1)`% de margem sobre a estimativa central
+— carregamento relevante do ponto de vista atuarial para um plano com tendência
+de envelhecimento estrutural.
 
-## Prêmios de credibilidade por grupo
+## Prêmios bayesianos e previsão para 2015
 
-O prêmio de credibilidade para o grupo $i$ no próximo período é a taxa credibilizada
-multiplicada pela exposição projetada. Para o modelo de Bühlmann-Straub:
-
-$$
-\hat{P}_i^{\text{BS}} = v_i^* \cdot \hat{\lambda}_i^H
-= v_i^* \left[\hat{\omega}_i\,\bar{F}_i^v + (1 - \hat{\omega}_i)\,\hat{\lambda}_0\right],
-$$
-
-e para o modelo bayesiano hierárquico, usando a mediana posterior:
+Para o modelo hierárquico bayesiano, o prêmio de credibilidade do grupo $i$ é
+a mediana da taxa posterior:
 
 $$
-\hat{P}_i^{\text{Bayes}} = v_i^* \cdot \hat{\lambda}_i^{\text{post}},
-\qquad
-\hat{\lambda}_i^{\text{post}} = e^{\hat{\beta}_0 + \hat{u}_i}.
+P_i^{\text{Bayes}} = \hat{\lambda}_i^{\text{post}} = e^{\hat{\beta}_0 + \hat{u}_i},
 $$
 
-Em ambos os casos o prêmio é o número esperado de sinistros — a taxa credibilizada
-converte exposição em contagem esperada, que é a base para o cálculo de reservas
-técnicas. Adotamos $v_i^* = E_{i,2014}$ (exposição observada em 2014) como projeção
-para o exercício seguinte.
+e o número esperado de sinistros para 2015 é:
+
+$$
+\hat{N}_i^{(2015),\text{Bayes}} = v_i^* \cdot P_i^{\text{Bayes}},
+$$
+
+com IC 95% dado por $[v_i^* \cdot q_{0{,}025}(\lambda_i^{\text{post}});\;
+v_i^* \cdot q_{0{,}975}(\lambda_i^{\text{post}})]$.
 
 ```{r dados-comparacao}
 #| label: dados-comparacao
 #| include: false
 
-# Preparar dados compartilhados entre premios-credibilidade e tabela-final
 prev_bayes_stan <- rate_summary |>
   left_join(exp_2014_stan |> select(faixa, v_2014 = vit), by = "faixa") |>
   mutate(
@@ -1664,71 +1839,57 @@ comp_3metodos <- previsao |>
 ```{r premios-credibilidade}
 #| label: premios-credibilidade
 
-premios <- comp_3metodos |>
-  mutate(
-    P_BS    = N_BS,     # = v* × lambda_cred (já calculado em previsao)
-    P_bayes = N_bayes,  # = v* × lambda_post (mediana)
-    P_tab   = N_tab     # = v* × q_tabua
-  ) |>
-  select(faixa, P_BS, P_bayes, N_lo95, N_hi95, P_tab, N_obs)
-
-premios |>
+# Prêmios bayesianos e número esperado de sinistros para 2015
+prev_bayes_stan |>
+  select(faixa, mediana, lo95, hi95, v_2014, N_bayes, N_lo95, N_hi95) |>
   bind_rows(
     tibble(
       faixa   = "Total",
-      P_BS    = sum(premios$P_BS),
-      P_bayes = sum(premios$P_bayes),
-      N_lo95  = sum(premios$N_lo95),
-      N_hi95  = sum(premios$N_hi95),
-      P_tab   = sum(premios$P_tab),
-      N_obs   = sum(premios$N_obs)
+      mediana = NA_real_,
+      lo95    = NA_real_,
+      hi95    = NA_real_,
+      v_2014  = sum(prev_bayes_stan$v_2014),
+      N_bayes = sum(prev_bayes_stan$N_bayes),
+      N_lo95  = sum(prev_bayes_stan$N_lo95),
+      N_hi95  = sum(prev_bayes_stan$N_hi95)
     )
   ) |>
   gt() |>
   tab_header(
-    title    = "Prêmios de credibilidade por grupo — previsão para 2014",
-    subtitle = md("$v_i^* = E_{i,2014}$; ajuste com 2012--2013")
+    title    = "Prêmios bayesianos e número esperado de sinistros (2015)",
+    subtitle = md("$P_i^{\\text{Bayes}} = e^{\\hat{\\beta}_0 + \\hat{u}_i}$; $v_i^* = E_{i,2014}$ como proxy de 2015")
   ) |>
   cols_label(
     faixa   = "Grupo",
-    P_BS    = md("$\\hat{P}_i^{\\text{BS}}$"),
-    P_bayes = md("$\\hat{P}_i^{\\text{Bayes}}$ (mediana)"),
+    mediana = md("$P_i^{\\text{Bayes}}$ (mediana)"),
+    lo95    = "IC 95% inf.",
+    hi95    = "IC 95% sup.",
+    v_2014  = md("$v_i^*$"),
+    N_bayes = md("$\\hat{N}_i^{(2015)}$ (mediana)"),
     N_lo95  = "IC 95% inf.",
-    N_hi95  = "IC 95% sup.",
-    P_tab   = md("$\\hat{P}_i^{\\text{tab}}$ (BR-EMS)"),
-    N_obs   = md("$N_i^{\\text{obs}}$ (2014)")
+    N_hi95  = "IC 95% sup."
   ) |>
-  fmt_number(columns = c(P_BS, P_bayes, N_lo95, N_hi95, P_tab, N_obs),
-             decimals = 1) |>
+  fmt_number(columns = c(mediana, lo95, hi95), decimals = 6) |>
+  fmt_number(columns = v_2014,                 decimals = 0) |>
+  fmt_number(columns = c(N_bayes, N_lo95, N_hi95), decimals = 1) |>
+  sub_missing(columns = c(mediana, lo95, hi95), missing_text = "—") |>
   tab_style(
     style     = list(cell_fill("#EBF5FB"), cell_text(weight = "bold")),
     locations = cells_body(rows = faixa == "Total")
   ) |>
-  tab_spanner(
-    label   = "Bühlmann-Straub",
-    columns = P_BS
-  ) |>
-  tab_spanner(
-    label   = md("Bayesiano hierárquico (Stan)"),
-    columns = c(P_bayes, N_lo95, N_hi95)
-  ) |>
-  tab_spanner(
-    label   = "Referência",
-    columns = c(P_tab, N_obs)
-  ) |>
+  tab_spanner(label = md("Prêmio $P_i^{\\text{Bayes}}$"),   columns = c(mediana, lo95, hi95)) |>
+  tab_spanner(label = "Número esperado de sinistros (2015)", columns = c(N_bayes, N_lo95, N_hi95)) |>
   tab_options(table.font.size = 13)
 ```
 
-O prêmio de Bühlmann-Straub e a mediana bayesiana coincidem coluna a coluna
-(diferenças $< 0{,}5$ sinistros), confirmando a equivalência teórica: o estimador
-de Bühlmann-Straub é o prêmio de Bayes ótimo sob perda quadrática no modelo
-Poisson-LogNormal quando $\sigma_u$ é grande em relação ao ruído de processo
-[@klugman2012, cap.~20]. O diferencial do modelo bayesiano está exclusivamente no
-intervalo credível de $95\%$: a coluna IC 95% inferior e superior permite calcular
-carregamentos de segurança com interpretação probabilística direta — por exemplo,
-o P95 da distribuição preditiva total ($\approx 1.321$ sinistros) pode ser usado
-como reserva técnica mínima para cobrir o ano com probabilidade $95\%$, representando
-um carregamento de $\approx 92$ sinistros ($7{,}5\%$) sobre a estimativa central de 1.229.
+A mediana dos prêmios bayesianos coincide com as taxas credibilizadas do BS
+(diferenças inferiores a $0{,}001$), confirmando a equivalência teórica
+[@klugman2012, cap. 20]. O intervalo credível de 95% para o total previsto
+em 2015 é $[`r round(sum(prev_bayes_stan$N_lo95), 0)`;\;
+`r round(sum(prev_bayes_stan$N_hi95), 0)`]$ sinistros — amplitude de
+`r round(sum(prev_bayes_stan$N_hi95) - sum(prev_bayes_stan$N_lo95), 0)`
+sinistros que reflete a incerteza residual sobre a estrutura de heterogeneidade
+$\sigma_u$ com apenas $m = 4$ grupos.
 
 ## Tabela comparativa final: BS, Bayesiano e Tábua
 
@@ -1807,15 +1968,21 @@ comp_3metodos |>
 ```
 
 A célula verde marca o método com menor erro absoluto em cada faixa; a faixa
-$[0, 18)$ é omitida do cálculo por ter zero óbitos observados. O estimador de
+[0, 18) é omitida do cálculo por ter zero óbitos observados. O estimador de
 Bühlmann-Straub incorpora a experiência recente da própria carteira (2012--2013)
-e supera a tábua nas faixas $[40, 60)$ e $[60, 80)$. O erro elevado em $[18, 40)$
-($54\%$ para BS e Bayes, $129\%$ para a tábua) é consequência de uma queda atípica
-nos óbitos de 2014 (22 óbitos vs. média histórica de 33,5) que nenhum método
-conseguiria prever com apenas dois anos de dados — e que reforça a limitação
-declarada na introdução sobre o horizonte mínimo de cinco anos exigido pela PREVIC.
-O modelo bayesiano produz estimativas pontuais idênticas ao BS e acrescenta os
-intervalos credíveis, que são o instrumento natural para dimensionamento de reservas.
+e supera a tábua nas faixas [40, 60) e [60, 80). O erro elevado em [18, 40)
+(`r round(abs(comp_3metodos$erro_BS[comp_3metodos$faixa == "[18, 40)"]), 0)`%
+para BS e Bayes,
+`r round(abs(comp_3metodos$erro_tab[comp_3metodos$faixa == "[18, 40)"]), 0)`%
+para a tábua) é consequência de uma queda atípica nos óbitos de 2014
+(`r bs_data$Nit[bs_data$faixa == "[18, 40)" & bs_data$Ano == "2014"]` óbitos
+vs. média histórica de
+`r round(mean(bs_data$Nit[bs_data$faixa == "[18, 40)" & bs_data$Ano %in% c("2012","2013")]), 1)`)
+que nenhum método conseguiria prever com apenas dois anos de dados — e que
+reforça a limitação declarada na introdução sobre o horizonte mínimo de cinco
+anos exigido pela PREVIC. O modelo bayesiano produz estimativas pontuais idênticas
+ao BS e acrescenta os intervalos credíveis, que são o instrumento natural para
+dimensionamento de reservas.
 
 ---
 
