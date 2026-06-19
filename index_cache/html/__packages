@@ -19,3 +19,5 @@ bayesplot
 scico
 ggiraph
 gtExtras
+zoo
+changepoint
