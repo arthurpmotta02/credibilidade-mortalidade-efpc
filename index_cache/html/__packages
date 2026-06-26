@@ -19,5 +19,5 @@ bayesplot
 scico
 ggiraph
 gtExtras
-zoo
-changepoint
+fastcpd
+mortSOA
