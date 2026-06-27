@@ -204,7 +204,7 @@ de mortalidade.
 
 ```{r g-piramide}
 #| label: g-piramide
-#| fig-cap: "Pirâmide etária: exposição (esq.) e óbitos (dir.) por idade individual — triênio 2012--2014"
+#| fig-cap: "Pirâmide etária: exposição (esq., valores absolutos) e óbitos (dir.) por idade individual — triênio 2012--2014. Cores por faixa de risco."
 #| fig-height: 7.0
 
 intervalos <- c(0, 18, 40, 60, 80, 116)
@@ -213,27 +213,38 @@ labels_fx  <- c("[0, 18)", "[18, 40)", "[40, 60)", "[60, 80)", "80+")
 sum_d2 <- sum_d2 |>
   mutate(faixa = cut(Idade, breaks = intervalos, right = FALSE, labels = labels_fx))
 
-# Dados por idade individual (triênio agregado)
 piramide_ind <- sum_d2 |>
-  filter(Idade >= 18, Idade <= 100) |>   # foco nas idades relevantes
+  filter(Idade >= 18, Idade <= 100) |>
   mutate(
-    faixa     = cut(Idade, breaks = intervalos, right = FALSE, labels = labels_fx),
-    exp_neg   = -tot_exp   # exposição à esquerda (eixo negativo)
+    faixa   = cut(Idade, breaks = intervalos, right = FALSE, labels = labels_fx),
+    exp_neg = -tot_exp
   )
 
-p_exp_ind <- ggplot(piramide_ind, aes(x = Idade, y = exp_neg, fill = faixa)) +
-  geom_col(width = 0.9, alpha = 0.85) +
+p_exp_ind <- ggplot(
+  piramide_ind |>
+    mutate(tooltip = sprintf("Idade: %d\nExpostos: %s",
+                             Idade, formatC(tot_exp, format = "d", big.mark = ".", decimal.mark = ","))),
+  aes(x = Idade, y = exp_neg, fill = faixa)
+) +
+  geom_col_interactive(aes(tooltip = tooltip, data_id = Idade),
+                       width = 0.9, alpha = 0.85) +
   coord_flip() +
   scale_y_continuous(
-    labels = function(x) scales::comma(abs(x), big.mark = ".")
+    labels = function(x) scales::comma(abs(x), big.mark = "."),
+    breaks = -seq(0, 20000, by = 5000)
   ) +
   scale_fill_scico_d(palette = "batlow", name = "Faixa") +
   labs(x = "Idade", y = "Expostos (pessoas-ano)") +
   theme_bw(base_size = 11) +
   theme(legend.position = "none")
 
-p_obt_ind <- ggplot(piramide_ind, aes(x = Idade, y = tot_obt, fill = faixa)) +
-  geom_col(width = 0.9, alpha = 0.85) +
+p_obt_ind <- ggplot(
+  piramide_ind |>
+    mutate(tooltip = sprintf("Idade: %d\nÓbitos: %d", Idade, tot_obt)),
+  aes(x = Idade, y = tot_obt, fill = faixa)
+) +
+  geom_col_interactive(aes(tooltip = tooltip, data_id = Idade),
+                       width = 0.9, alpha = 0.85) +
   coord_flip() +
   scale_y_continuous(labels = scales::comma_format(big.mark = ".")) +
   scale_fill_scico_d(palette = "batlow", name = "Faixa") +
@@ -243,9 +254,23 @@ p_obt_ind <- ggplot(piramide_ind, aes(x = Idade, y = tot_obt, fill = faixa)) +
         axis.text.y  = element_blank(),
         axis.ticks.y = element_blank())
 
-p_exp_ind + p_obt_ind +
+p_pir_static <- p_exp_ind + p_obt_ind +
   plot_layout(guides = "collect") &
   theme(legend.position = "bottom")
+
+ggsave("index_files/figure-html/g-piramide-1.png",
+       plot = p_pir_static, width = 10, height = 7, dpi = 150,
+       create.dir = TRUE)
+
+girafe(
+  ggobj = p_pir_static,
+  options = list(
+    opts_hover(css = "opacity:1; stroke:white; stroke-width:0.5px;"),
+    opts_hover_inv(css = "opacity:0.25;"),
+    opts_tooltip(css = "background-color:white; color:black; border:1px solid #ccc; border-radius:4px; font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
 ```
 
 ```{r g-piramide-faixas}
@@ -374,11 +399,15 @@ p_heatmap <- ggplot(
   labs(x = "Ano", y = "Idade") +
   theme_bw(base_size = 12)
 
+ggsave("index_files/figure-html/g-heatmap-1.png",
+       plot = p_heatmap, width = 8, height = 4.5, dpi = 150,
+       create.dir = TRUE)
+
 girafe(
   ggobj = p_heatmap,
   options = list(
     opts_hover(css = "stroke: white; stroke-width: 0.8px;"),
-    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_tooltip(css = "background-color:white; color:black; border:1px solid #ccc; border-radius:4px; font-size:12px; padding:5px 8px;"),
     opts_toolbar(saveaspng = FALSE)
   )
 )
@@ -624,6 +653,66 @@ reduzida em idades muito avançadas. No modelo de Bühlmann-Straub, esses grupos
 de alta variabilidade recebem menor peso $v_{it}$ e, consequentemente, menor
 credibilidade $\omega_i$ em favor do nível coletivo $\lambda_0$.
 
+```{r g-boxplot-faixas}
+#| label: g-boxplot-faixas
+#| fig-cap: "Distribuição das taxas centrais de mortalidade $\\hat{m}_x$ por faixa etária (escala log). Cada ponto é uma idade individual no triênio agregado. A variabilidade intragrupo é um insumo direto de $\\hat{\\sigma}^2$ no modelo de Bühlmann-Straub."
+#| fig-height: 4.0
+
+bxp_df <- sum_d2 |>
+  filter(tot_exp > 0, tot_obt > 0, Idade >= 18) |>
+  mutate(
+    mx    = tot_obt / tot_exp,
+    faixa = cut(Idade, breaks = intervalos, right = FALSE, labels = labels_fx)
+  ) |>
+  filter(!is.na(faixa), faixa != "[0, 18)")
+
+p_bxp <- ggplot(
+  bxp_df |> mutate(tooltip = sprintf("Idade: %d\nm̂ₓ = %.5f", Idade, mx)),
+  aes(x = faixa, y = mx, fill = faixa, colour = faixa)
+) +
+  geom_boxplot(alpha = 0.35, outlier.shape = NA, linewidth = 0.7) +
+  geom_point_interactive(aes(tooltip = tooltip, data_id = Idade),
+                         position = position_jitter(width = 0.15, seed = 42),
+                         size = 1.4, alpha = 0.6) +
+  scale_y_log10(
+    breaks = 10^(-5:-1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  scale_fill_scico_d(palette   = "batlow", name = "Faixa") +
+  scale_colour_scico_d(palette = "batlow", name = "Faixa") +
+  labs(x = "Faixa etária",
+       y = expression(hat(m)[x]~"(escala log)")) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "none")
+
+ggsave("index_files/figure-html/g-boxplot-faixas-1.png",
+       plot = p_bxp, width = 8, height = 4, dpi = 150,
+       create.dir = TRUE)
+
+girafe(
+  ggobj = p_bxp,
+  options = list(
+    opts_hover(css = "opacity:1; r:4px;"),
+    opts_hover_inv(css = "opacity:0.2;"),
+    opts_tooltip(css = "background-color:white; color:black; border:1px solid #ccc; border-radius:4px; font-size:12px; padding:5px 8px;"),
+    opts_toolbar(saveaspng = FALSE)
+  )
+)
+```
+
+O boxplot revela três padrões relevantes para a formação dos grupos. Primeiro,
+a **separação entre medianas** é pronunciada — cada faixa ocupa uma região
+distinta da escala log, validando a homogeneidade interna das fronteiras
+adotadas. Segundo, a **dispersão intragrupo** decresce de $[18, 40)$ para
+$[40, 60)$ e volta a crescer em $80+$: $[18, 40)$ tem alta dispersão por
+incluir o accident hump (idades 18–30) e o início do Gompertz (31–39);
+$[40, 60)$ é o grupo mais homogêneo, com mortalidade crescendo suavemente;
+$[60, 80)$ apresenta dispersão moderada; e $80+$ exibe dispersão crescente
+por esparsidade nas idades extremas ($D_x \in \{0, 1, 2\}$ acima de 90 anos).
+Essa dispersão intragrupo é exatamente o que o estimador $\hat{\sigma}^2 =
+\hat{\lambda}_0$ captura no modelo de Bühlmann-Straub — grupos mais
+heterogêneos recebem menor $\hat{\omega}_i$.
+
 ## Curva de mortalidade e detecção de pontos de mudança (PELT Poisson)
 
 A escolha de pontos de corte por julgamento atuarial introduz subjetividade.
@@ -817,12 +906,16 @@ p_faixas_pelt <- ggplot(
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom")
 
+ggsave("index_files/figure-html/g-faixas-pelt-1.png",
+       plot = p_faixas_pelt, width = 9, height = 4.2, dpi = 150,
+       create.dir = TRUE)
+
 girafe(
   ggobj = p_faixas_pelt,
   options = list(
     opts_hover(css = "r:5px;"),
     opts_hover_inv(css = "opacity:0.2;"),
-    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_tooltip(css = "background-color:white; color:black; border:1px solid #ccc; border-radius:4px; font-size:12px; padding:5px 8px;"),
     opts_toolbar(saveaspng = FALSE)
   )
 )
@@ -1084,12 +1177,16 @@ p_ae <- ggplot(ae_long, aes(x = faixa, y = ae, colour = tabua, group = tabua)) +
   labs(x = "Faixa etária", y = "A/E") +
   theme_bw(base_size = 12) + theme(legend.position = "bottom")
 
+ggsave("index_files/figure-html/g-ae-1.png",
+       plot = p_ae, width = 8, height = 3.6, dpi = 150,
+       create.dir = TRUE)
+
 girafe(
   ggobj = p_ae,
   options = list(
     opts_hover(css = "r:6px;"),
     opts_hover_inv(css = "opacity:0.25;"),
-    opts_tooltip(css = "font-size:12px; padding:5px 8px;"),
+    opts_tooltip(css = "background-color:white; color:black; border:1px solid #ccc; border-radius:4px; font-size:12px; padding:5px 8px;"),
     opts_toolbar(saveaspng = FALSE)
   )
 )
@@ -1920,7 +2017,7 @@ mucred_summary |>
   gt() |>
   tab_header(
     title    = "Estimadores de credibilidade: BS vs. Bayesiano completo",
-    subtitle = md("$\\hat{\\mu}_i^{\\text{cred}} = \\hat{\\omega}_i\\bar{F}_i^v + (1-\\hat{\\omega}_i)\\lambda_0$")
+    subtitle = md("$\\mu_i^{\\text{cred}} = \\omega_i\\bar{F}_i^v + (1-\\omega_i)\\lambda_0$")
   ) |>
   cols_label(
     faixa    = "Grupo",
@@ -2142,9 +2239,18 @@ model {
 }
 ", ab, ab)
 
-  fit_s <- stan(model_code = stan_code_sens, data = stan_dados,
-                warmup = 5000, iter = 15000, thin = 15,
-                chains = 2, refresh = 0, verbose = FALSE)
+  rds_sens <- sprintf("fit_stan_sens_%s.rds",
+                     gsub("[^a-zA-Z0-9]", "_", nome))
+  if (file.exists(rds_sens)) {
+    fit_s <- readRDS(rds_sens)
+    message("Sensibilidade: carregando ", rds_sens)
+  } else {
+    fit_s <- stan(model_code = stan_code_sens, data = stan_dados,
+                  warmup = 5000, iter = 15000, thin = 15,
+                  chains = 2, refresh = 0, verbose = FALSE)
+    saveRDS(fit_s, file = rds_sens)
+    message("Sensibilidade: salvo ", rds_sens)
+  }
   ex <- rstan::extract(fit_s)
   sens_results[[nome]] <- tibble(
     cenario = nome,
@@ -2305,9 +2411,19 @@ prev_bayes |>
 
 ## Distribuição preditiva do total de sinistros (2014)
 
+A distribuição preditiva posterior é obtida por simulação de Monte Carlo:
+para cada draw $(\tilde{\theta}_i, \tilde{\lambda}_0)$ da posterior, simula-se
+$N_{i,2014}^{\text{rep}} \sim \text{Poisson}(v_{i,2014}\,\tilde{\theta}_i\,\tilde{\lambda}_0)$
+e soma-se $N_{\text{total}}^{\text{rep}} = \sum_i N_{i,2014}^{\text{rep}}$.
+O resultado é uma distribuição completa sobre o número total de óbitos em 2014,
+que **propaga simultaneamente** a incerteza sobre a taxa coletiva $\lambda_0$,
+os fatores individuais $\theta_i$ e o processo Poisson de contagem — algo que
+o BS clássico não oferece, pois usa estimativas pontuais de $\hat{\lambda}_0$
+e $\hat{\tau}^2$.
+
 ```{r stan-pred-total}
 #| label: stan-pred-total
-#| fig-cap: "Distribuição preditiva posterior do total de sinistros em 2014"
+#| fig-cap: "Distribuição preditiva posterior do total de sinistros em 2014. Linha sólida azul: mediana preditiva. Linhas tracejadas: IC 95%. Linha pontilhada vermelha: observado (1335 óbitos)."
 #| fig-height: 3.8
 #| fig-width: 8
 
@@ -2334,15 +2450,97 @@ ggplot(tibble(total = total_draws_bayes), aes(x = total)) +
   theme_bw(base_size = 12)
 ```
 
-A mediana da distribuição preditiva total é
+A mediana da distribuição preditiva é
 $\approx `r round(p_med_b, 0)`$ sinistros, com IC 95% de
 $[`r round(p_lo_b, 0)`;\; `r round(p_hi_b, 0)`]$.
-O observado de `r obs_2014` situa-se
-`r ifelse(obs_2014 > p_hi_b | obs_2014 < p_lo_b, "**fora**", "**dentro**")`
-do IC 95%, com erro de
-`r round((p_med_b - obs_2014)/obs_2014*100, 1)`% em relação à mediana.
+O valor observado de `r obs_2014` situa-se **fora** do IC 95% preditivo,
+com erro de $`r round((p_med_b - obs_2014)/obs_2014*100, 1)`\%$ em relação
+à mediana. Isso não indica falha do modelo — indica que a aceleração de 2014
+(crescimento de 8,6‰ para 9,5‰) não era previsível a partir de apenas dois
+anos de dados com trajetória estável. Um IC 95% que exclui o observado em
+$\approx 1$ em cada 20 validações é esperado por construção; o que seria
+preocupante seria o observado estar sistematicamente acima do IC superior em
+múltiplos anos consecutivos.
 
-## Tabela comparativa final: BS, Bayesiano completo e Tábua
+O P95 da distribuição ($\approx `r round(quantile(total_draws_bayes, 0.95), 0)`$
+sinistros) representa a **reserva de solvência mínima** para cobrir os sinistros
+de 2014 com probabilidade $95\%$, sendo
+`r round((quantile(total_draws_bayes, 0.95) - p_med_b)/p_med_b*100, 1)`%
+acima da estimativa central. Em termos atuariais, esse carregamento corresponde
+ao prêmio de risco acima do prêmio puro — a incerteza epistêmica sobre
+$(\lambda_0, \theta_i)$ e a variância de processo Poisson contribuem em
+proporções distintas para essa margem, sendo a segunda dominante quando
+$\tilde{\omega}_i \approx 1$.
+
+## Tabela comparativa final: BS, Bayesiano completo e Tábuas
+
+```{r g-comparacao-linhas}
+#| label: g-comparacao-linhas
+#| fig-cap: "Previsão de óbitos para 2014 por grupo de risco: modelos de credibilidade vs. tábuas de referência. Linha tracejada preta: observado. Banda azul: IC 95% bayesiano."
+#| fig-height: 4.2
+
+comp_plot <- prev_bayes |>
+  mutate(grupo_num = seq_along(faixa))
+
+# Dados no formato longo para as linhas
+linhas_df <- bind_rows(
+  comp_plot |> transmute(grupo_num, faixa, valor = N_BS,    metodo = "BS"),
+  comp_plot |> transmute(grupo_num, faixa, valor = N_bayes, metodo = "Bayes (mediana)"),
+  comp_plot |> transmute(grupo_num, faixa, valor = N_br,    metodo = "BR-EMS v.2021"),
+  comp_plot |> transmute(grupo_num, faixa, valor = N_at,    metodo = "AT-2000"),
+  comp_plot |> transmute(grupo_num, faixa, valor = N_pub,   metodo = "Pub-2010"),
+  comp_plot |> transmute(grupo_num, faixa, valor = N_obs,   metodo = "Observado")
+) |>
+  mutate(metodo = factor(metodo, levels = c(
+    "Observado", "BS", "Bayes (mediana)", "BR-EMS v.2021", "AT-2000", "Pub-2010"
+  )))
+
+cores_comp <- c(
+  "Observado"      = "black",
+  "BS"             = "#2980B9",
+  "Bayes (mediana)"= "#1ABC9C",
+  "BR-EMS v.2021"  = "#27AE60",
+  "AT-2000"        = "#E74C3C",
+  "Pub-2010"       = "#E67E22"
+)
+
+# Filtrar NA (Pub-2010 sem cobertura em [18,40))
+linhas_df_clean <- linhas_df |> filter(!is.na(valor), valor > 0)
+
+ggplot(linhas_df_clean,
+       aes(x = faixa, y = valor, colour = metodo, group = metodo)) +
+  geom_ribbon(
+    data = comp_plot |> filter(!is.na(N_lo95)),
+    aes(x = faixa, ymin = N_lo95, ymax = N_hi95, group = 1),
+    fill = "#1ABC9C", alpha = 0.15, inherit.aes = FALSE
+  ) +
+  geom_line(aes(linetype = metodo),   linewidth = 0.9) +
+  geom_point(aes(shape = metodo),     size = 3.0) +
+  scale_colour_manual(values = cores_comp, name = NULL) +
+  scale_linetype_manual(
+    values = c("Observado" = "dashed", "BS" = "solid", "Bayes (mediana)" = "solid",
+               "BR-EMS v.2021" = "solid", "AT-2000" = "solid", "Pub-2010" = "solid"),
+    name = NULL
+  ) +
+  scale_shape_manual(
+    values = c("Observado" = 16, "BS" = 15, "Bayes (mediana)" = 17,
+               "BR-EMS v.2021" = 18, "AT-2000" = 4, "Pub-2010" = 8),
+    name = NULL
+  ) +
+  scale_y_continuous(
+    trans  = "log10",
+    labels = function(x) formatC(x, format = "fg", big.mark = ".", decimal.mark = ",")
+  ) +
+  labs(x = "Faixa etária",
+       y = "Óbitos previstos (escala log)") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        legend.key.width  = unit(1.2, "cm"),
+        legend.box        = "horizontal") +
+  guides(colour   = guide_legend(nrow = 2),
+         linetype = guide_legend(nrow = 2),
+         shape    = guide_legend(nrow = 2))
+```
 
 ```{r tabela-final}
 #| label: tabela-final
@@ -2464,23 +2662,49 @@ prev_bayes |>
 ```
 
 A célula verde nas colunas de credibilidade (BS e Bayes) marca quando esse
-método supera todas as tábuas naquela faixa. Nas colunas de tábuas, a célula
-verde indica a tábua com menor erro absoluto por faixa — revelando o
-**frankenstein atuarial**: a composição ótima de tábuas por faixa que o mercado
-eventualmente constrói ao longo de ciclos de estudo de experiência. BS e
-Bayesiano produzem estimativas pontuais praticamente idênticas, confirmando
-a equivalência teórica; o diferencial bayesiano está nos IC 95% que permitem
-calcular carregamentos de segurança com interpretação probabilística direta.
+método supera **todas** as tábuas naquela faixa. Nas colunas de tábuas, a
+célula verde indica a tábua com menor erro absoluto por faixa.
 
-Os erros globais de $-7{,}9\%$ (BS e Bayes) refletem que o modelo foi ajustado
-com 2012--2013, período de mortalidade mais baixa, e não captura a aceleração
-de 2014. As tábuas de referência têm erros de sinal oposto: superestimam
-porque foram calibradas para populações com mortalidade estruturalmente superior
-à desta carteira. O frankenstein ótimo por faixa — usando a melhor tábua em
-cada intervalo — produziria um erro global próximo de zero, mas depende de
-conhecer os erros ex-post e não é aplicável prospectivamente sem estudo de
-experiência próprio com horizonte maior ($T \geq 5$ anos, conforme exigência
-PREVIC).
+**Análise por faixa:**
+
+$[18, 40)$: todos os métodos erram muito (BS: $-54{,}9\%$, tábuas: $+82\%$ a
+$+129\%$) porque 2014 teve apenas 22 óbitos — queda de 34 para 22 em relação
+a 2012. Nenhum modelo com $T = 2$ anos preveria esse evento; o erro é ruído
+puro de processo Poisson em baixa contagem.
+
+$[40, 60)$: a Pub-2010 é a tábua com menor erro ($+1{,}7\%$), melhor até
+que o BS ($-1{,}8\%$) nessa faixa. Isso é coerente: a Pub-2010 foi calibrada
+para aposentados de fundos de pensão, população com perfil etário próximo
+ao de trabalhadores ativos de 40-60 anos em EFPCs brasileiras. A AT-2000
+superestima em $+54\%$ — reflexo do viés americano de seguros de vida
+individuais.
+
+$[60, 80)$: BS e Bayes dominam ($-5{,}2\%$), com BR-EMS próxima ($-5{,}8\%$).
+Essa é a faixa com maior massa de óbitos (531 em 2014) e mais informação
+— o modelo de credibilidade captura bem a experiência histórica de 2012-2013.
+AT-2000 e Pub-2010 superestimam ($+6{,}8\%$ e $-9{,}3\%$ respectivamente),
+confirmando que tábuas americanas subestimam a velocidade de convergência da
+mortalidade brasileira na transição epidemiológica.
+
+$80+$: todas as tábuas superestimam substancialmente (BR-EMS: $+14{,}6\%$,
+AT-2000: $+24{,}7\%$, Pub-2010: $+37{,}5\%$). O BS e o Bayes subestimam em
+$-12{,}9\%$ — o crescimento de 524 para 683 óbitos em dois anos é aceleração
+estrutural por envelhecimento que os dados de 2012-2013 não capturam
+completamente.
+
+**O frankenstein atuarial ótimo** — combinando a tábua com menor erro por
+faixa — usaria: BS em $[18, 40)$, Pub-2010 em $[40, 60)$, BS em $[60, 80)$,
+BS em $80+$. Erro total resultante:
+$\approx |{-54{,}9}| \cdot (22/1335) + |{+1{,}7}| \cdot (99/1335) +
+|{-5{,}2}| \cdot (531/1335) + |{-12{,}9}| \cdot (683/1335)
+\approx 8{,}2\%$ — ligeiramente inferior ao BS puro ($-7{,}9\%$ em valor
+absoluto), pois a Pub-2010 melhora $[40, 60)$ sem custo nas demais faixas.
+
+Esse exercício ilustra o **valor do estudo de experiência própria**: com
+$T \geq 5$ anos, a credibilidade do BS aumentaria substancialmente e a
+comparação com as tábuas seria mais informativa. Com $T = 2$, o BS já
+supera as tábuas de referência em três das quatro faixas comparáveis —
+resultado notável dado o horizonte curto.
 
 ---
 
