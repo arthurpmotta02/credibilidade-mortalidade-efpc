@@ -8,11 +8,15 @@ DME / Instituto de Matemática — UFRJ
 
 ---
 
-## Relatório interativo
+## Relatório
 
-O trabalho está publicado como página web com código, gráficos interativos e tabelas completas:
+[![Relatório Web](https://img.shields.io/badge/Relatório%20Interativo-GitHub%20Pages-003865)](https://arthurpmotta02.github.io/credibilidade-mortalidade-efpc/)
+[![Relatório PDF](https://img.shields.io/badge/Relatório-PDF-red)](relatorio.pdf)
 
-### 🔗 [arthurpmotta02.github.io/credibilidade-mortalidade-efpc](https://arthurpmotta02.github.io/credibilidade-mortalidade-efpc/)
+O relatório está disponível em dois formatos:
+
+- **[Versão interativa](https://arthurpmotta02.github.io/credibilidade-mortalidade-efpc/)** — gráficos com tooltips, código R integrado e tabelas completas (GitHub Pages)
+- **[Versão PDF](relatorio.pdf)** — relatório completo formatado em LaTeX
 
 ---
 
@@ -150,21 +154,25 @@ Previsão 2014: mediana $\approx 1.230$ · IC 95% $[1.144;\,1.322]$
 
 ```
 .
-├── index.qmd                              # Documento-fonte (Quarto)
-├── index.html                             # Relatório renderizado (11 MB)
-├── referencias.bib                        # Referências bibliográficas (ABNT)
-├── dadosfundopensao.csv                   # Dados: Eit e Dit por idade, 2012–2014
-├── at2000.iba.csv                         # Tábua AT-2000 masculina
-├── brems2021.iba.csv                      # Tábua BR-EMSsb-m v.2021
-├── fit_stan_efpc.rds                      # Fit Stan principal (4 cadeias × 30k iter)
-├── fit_stan_sens_Vaga__a__b__0__001_.rds  # Fit Stan — priori vaga (a = b = 0,001)
-├── fit_stan_sens_Moderada__a__b__1_.rds   # Fit Stan — priori moderada (a = b = 1)
+├── index.qmd                               # Documento-fonte (Quarto)
+├── index.html                              # Relatório renderizado (11 MB)
+├── relatorio.pdf                           # Relatório completo em PDF (LaTeX)
+├── referencias.bib                         # Referências bibliográficas (ABNT)
+├── dadosfundopensao.csv                    # Dados: Eit e Dit por idade, 2012–2014
+├── at2000.iba.csv                          # Tábua AT-2000 masculina
+├── brems2021.iba.csv                       # Tábua BR-EMSsb-m v.2021
+├── fit_stan_efpc.rds                       # Fit Stan principal (4 cadeias × 30k iter, ~2 MB)
+├── fit_stan_sens_Vaga__a__b__0__001__.rds  # Fit Stan — priori vaga (a = b = 0,001, ~1,7 MB)
+├── fit_stan_sens_Moderada__a__b__1_.rds    # Fit Stan — priori moderada (a = b = 1, ~1,7 MB)
 ├── index_files/
-│   └── figure-html/                       # PNGs de todas as figuras
-└── .nojekyll                              # Necessário para GitHub Pages
+│   └── figure-html/                        # PNGs de todas as figuras
+├── .nojekyll                               # Necessário para GitHub Pages
+└── README.md
 ```
 
-> **Fits Stan (`.rds`):** gerados automaticamente na primeira renderização e reutilizados nas seguintes. O código verifica compatibilidade pelo número de grupos (`dim(theta)[2] == m`). Para forçar reajuste, delete o arquivo antes de renderizar. O arquivo principal pesa ~2 MB; cada cenário de sensibilidade ~1,7 MB.
+> **Fits Stan (`.rds`):** gerados automaticamente na primeira renderização e reutilizados nas seguintes. O código verifica compatibilidade pelo número de grupos (`dim(theta)[2] == m`). Para forçar reajuste, delete o arquivo antes de renderizar.
+
+> **`.nojekyll`:** necessário para que o GitHub Pages sirva corretamente o `index.html` gerado pelo Quarto sem processamento Jekyll.
 
 ---
 
